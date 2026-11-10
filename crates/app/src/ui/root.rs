@@ -3,10 +3,10 @@
 use crate::actions::*;
 use crate::store::{AppStore, StoreEvent};
 use crate::ui::add::AddDownload;
-use crate::ui::settings::SettingsView;
+use crate::ui::settings::{SettingsEvent, SettingsView};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{ActiveTheme as _, WindowExt as _, h_flex};
+use gpui_kit::component::{ActiveTheme as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::collections::{BTreeSet, HashSet};
@@ -63,6 +63,8 @@ pub struct AppView {
     pub(super) store: Entity<AppStore>,
     pub(super) focus: FocusHandle,
     pub(super) nav: Nav,
+    /// Where "Back to app" returns from settings.
+    pub(super) prev_nav: Nav,
     pub(super) group_by: GroupBy,
     pub(super) collapsed: HashSet<GroupKey>,
     pub(super) search: Entity<InputState>,
@@ -124,6 +126,7 @@ impl AppView {
             store,
             focus: cx.focus_handle(),
             nav: Nav::All,
+            prev_nav: Nav::All,
             group_by: GroupBy::Status,
             collapsed: HashSet::new(),
             search,
@@ -312,11 +315,23 @@ impl AppView {
     }
 
     pub(super) fn set_nav(&mut self, nav: Nav, window: &mut Window, cx: &mut Context<Self>) {
+        if nav == Nav::Settings && self.nav != Nav::Settings {
+            self.prev_nav = self.nav;
+        }
         self.nav = nav;
         if nav == Nav::Settings {
-            if self.settings_view.is_none() {
-                self.settings_view = Some(cx.new(|cx| SettingsView::new(window, cx)));
-            }
+            let view = match &self.settings_view {
+                Some(v) => v.clone(),
+                None => {
+                    let v = cx.new(|cx| SettingsView::new(window, cx));
+                    self._subscriptions.push(cx.subscribe_in(&v, window, |this, _, ev, window, cx| match ev {
+                        SettingsEvent::Close => this.set_nav(this.prev_nav, window, cx),
+                    }));
+                    self.settings_view = Some(v.clone());
+                    v
+                }
+            };
+            view.focus_handle(cx).focus(window, cx);
         } else {
             self.focus.focus(window, cx);
         }
@@ -502,6 +517,20 @@ impl AppView {
         el.on_action(cx.listener(|this, _: &NewDownload, window, cx| this.open_add(None, window, cx)))
             .on_action(cx.listener(|this, _: &OpenCommandPalette, window, cx| crate::ui::palette::open(this, window, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.set_nav(Nav::Settings, window, cx)))
+            .on_action(cx.listener(|this, _: &OpenBandwidthSettings, window, cx| {
+                this.set_nav(Nav::Settings, window, cx);
+                if let Some(view) = this.settings_view.clone() {
+                    view.update(cx, |v, cx| v.select(crate::ui::settings::Section::Bandwidth, window, cx));
+                }
+            }))
+            .on_action(cx.listener(|this, a: &SetDownloadLimit, _, cx| {
+                let bytes = a.bytes;
+                this.store.update(cx, |store, cx| {
+                    let mut s = store.settings().clone();
+                    s.max_download_limit = bytes;
+                    store.update_settings(s, cx);
+                });
+            }))
             .on_action(cx.listener(|this, _: &ShowAll, window, cx| this.set_nav(Nav::All, window, cx)))
             .on_action(cx.listener(|this, _: &ShowActive, window, cx| this.set_nav(Nav::State(State::Active), window, cx)))
             .on_action(cx.listener(|this, _: &ShowQueued, window, cx| this.set_nav(Nav::State(State::Queued), window, cx)))
@@ -538,36 +567,41 @@ impl Focusable for AppView {
 
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let main: AnyElement = match (&self.nav, &self.settings_view) {
-            (Nav::Settings, Some(view)) => view.clone().into_any_element(),
-            _ => {
-                let list = self.render_list(window, cx);
-                let list = self.register_actions(list, cx);
-                list.into_any_element()
-            }
-        };
-        let show_detail = self.detail_open && self.nav != Nav::Settings;
         let root = h_flex()
             .size_full()
             .bg(cx.theme().sidebar)
             .text_color(cx.theme().foreground)
-            .text_size(px(13.))
-            .child(self.render_sidebar(window, cx))
-            .child(
+            .text_size(px(14.));
+        // Settings take over the whole window, with their own sidebar.
+        let root = if let (Nav::Settings, Some(view)) = (&self.nav, &self.settings_view) {
+            root.child(view.clone())
+        } else {
+            let list = self.render_list(window, cx);
+            let main = self.register_actions(list, cx).into_any_element();
+            let show_detail = self.detail_open;
+            root.child(self.render_sidebar(window, cx)).child(
                 // Linear's inset content panel.
                 div().flex_1().min_w_0().h_full().py_2().pr_2().child(
-                    h_flex()
+                    v_flex()
                         .size_full()
                         .rounded(px(10.))
                         .border_1()
                         .border_color(cx.theme().border)
                         .bg(cx.theme().background)
                         .overflow_hidden()
-                        .child(div().flex_1().min_w_0().h_full().child(main))
-                        .when(show_detail, |this| this.child(self.render_detail(window, cx))),
+                        .child(
+                            h_flex()
+                                .flex_1()
+                                .min_h_0()
+                                .w_full()
+                                .child(div().flex_1().min_w_0().h_full().child(main))
+                                .when(show_detail, |this| this.child(self.render_detail(window, cx))),
+                        )
+                        .child(self.render_status_bar(cx)),
                 ),
             )
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+        };
+        let root = root.on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 let torrents: Vec<_> = paths.paths().iter().filter(|p| p.extension().is_some_and(|e| e == "torrent" || e == "metalink" || e == "meta4")).cloned().collect();
                 for p in torrents {
                     match std::fs::read(&p) {

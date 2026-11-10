@@ -1,14 +1,15 @@
 //! Left navigation, Linear style: workspace header, primary views, categories.
 
-use super::kit::{category_icon, kbd, state_color, state_icon};
+use super::kit::{category_icon, state_color, state_icon, window_drag_area};
 use super::root::{AppView, Nav};
-use crate::actions::NewDownload;
+use crate::actions::{CycleTheme, HideWindow, NewDownload, OpenCommandPalette, OpenDownloadsFolder, OpenSettings, Quit};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::DropdownMenu as _;
 use crate::theme::palette;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use yadm_core::format;
 use yadm_core::{Category, EngineStatus, State};
 
 impl AppView {
@@ -26,7 +27,7 @@ impl AppView {
         let theme = cx.theme();
         h_flex()
             .id(id)
-            .h(px(28.))
+            .h(px(30.))
             .px_2()
             .gap_2()
             .rounded(px(6.))
@@ -54,70 +55,49 @@ impl AppView {
         let count_cat = |c: Category| snap.downloads.iter().filter(|d| d.category == c).count();
         let theme = cx.theme().clone();
 
-        // Own row for the macOS traffic lights; doubles as the window drag area.
-        let titlebar = div()
-            .id("sidebar-titlebar")
-            .h(px(40.))
-            .flex_shrink_0()
-            .on_mouse_down(MouseButton::Left, |ev: &MouseDownEvent, window, _| {
-                if ev.click_count >= 2 {
-                    window.titlebar_double_click();
-                } else {
-                    window.start_window_move();
-                }
+        let titlebar = window_drag_area("sidebar-titlebar");
+
+        // Linear's top row: workspace menu on the left, search and compose on the right.
+        let app_menu = Button::new("app-menu")
+            .ghost()
+            .small()
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child("YADM"))
+                    .child(Icon::new(Lucide::ChevronDown).xsmall().text_color(theme.muted_foreground)),
+            )
+            .dropdown_menu(|menu, _, _| {
+                menu.menu("Settings…", Box::new(OpenSettings))
+                    .menu("Switch theme", Box::new(CycleTheme))
+                    .menu("Open downloads folder", Box::new(OpenDownloadsFolder))
+                    .separator()
+                    .menu("Hide YADM", Box::new(HideWindow))
+                    .menu("Quit YADM", Box::new(Quit))
             });
-
-        let header = h_flex()
-            .h(px(36.))
-            .px_4()
-            .gap_2()
-            .child(
-                div()
-                    .size(px(20.))
-                    .rounded(px(5.))
-                    .bg(p.accent)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(Icon::new(Lucide::CircleArrowDown).xsmall().text_color(white())),
-            )
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("YADM"));
-
-        let new_button = h_flex()
-            .id("sidebar-new")
-            .mx_2()
-            .h(px(30.))
+        let top_row = h_flex()
             .px_2()
-            .gap_2()
-            .rounded(px(6.))
-            .border_1()
-            .border_color(theme.border)
-            .bg(theme.background)
-            .cursor_pointer()
-            .hover(|this| this.bg(theme.accent))
-            .child(Icon::new(Lucide::SquarePen).small().text_color(theme.muted_foreground))
-            .child(div().flex_1().child("New download"))
-            .child(kbd("⌘ N", cx))
-            .on_click(|_, window, cx| window.dispatch_action(Box::new(NewDownload), cx));
-
-        let speed = h_flex()
-            .mx_2()
-            .px_2()
-            .gap_3()
-            .text_xs()
-            .text_color(theme.muted_foreground)
+            .h(px(34.))
+            .gap_0p5()
+            .child(app_menu)
+            .child(div().flex_1())
             .child(
-                h_flex()
-                    .gap_1()
-                    .child(Icon::new(Lucide::ArrowDown).xsmall().text_color(p.accent))
-                    .child(format::speed(snap.global.dl_speed)),
+                Button::new("sidebar-search")
+                    .ghost()
+                    .small()
+                    .icon(Icon::new(Lucide::Search))
+                    .tooltip("Search  ⌘K")
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(OpenCommandPalette), cx)),
             )
             .child(
-                h_flex()
-                    .gap_1()
-                    .child(Icon::new(Lucide::ArrowUp).xsmall().text_color(p.green))
-                    .child(format::speed(snap.global.ul_speed)),
+                Button::new("sidebar-new")
+                    .outline()
+                    .small()
+                    .icon(Icon::new(Lucide::Plus))
+                    .tooltip("New download  ⌘N")
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(NewDownload), cx)),
             );
+
 
         let group_label = |label: &'static str| {
             div()
@@ -160,11 +140,13 @@ impl AppView {
             let id = ElementId::Name(format!("nav-cat-{}", c.as_str()).into());
             cat_items.push(self.nav_item(id, category_icon(c), None, c.label().into(), Some(n), Nav::Category(c), cx));
         }
+        // With nothing downloaded there's nothing to browse by category.
+        let any_visible = Category::ALL.len() > hidden;
         let expanded = self.show_empty_categories;
-        let toggle = (hidden > 0).then(|| {
+        let toggle = (hidden > 0 && any_visible).then(|| {
             h_flex()
                 .id("nav-cat-toggle")
-                .h(px(28.))
+                .h(px(30.))
                 .px_2()
                 .gap_2()
                 .rounded(px(6.))
@@ -203,12 +185,11 @@ impl AppView {
             .px_2()
             .pb_2()
             .gap_px()
-            .child(self.nav_item("nav-settings", Lucide::Settings, None, "Settings".into(), None, Nav::Settings, cx))
             .child(
                 h_flex()
                     .id("engine-status")
                     .px_2()
-                    .h(px(24.))
+                    .h(px(26.))
                     .gap_2()
                     .text_xs()
                     .text_color(theme.muted_foreground)
@@ -218,15 +199,12 @@ impl AppView {
             );
 
         v_flex()
-            .w(px(232.))
+            .w(px(248.))
             .h_full()
             .flex_shrink_0()
             .bg(theme.sidebar)
             .child(titlebar)
-            .child(header)
-            .child(new_button)
-            .child(div().h_2())
-            .child(speed)
+            .child(top_row)
             .child(
                 v_flex()
                     .id("sidebar-scroll")
@@ -234,8 +212,7 @@ impl AppView {
                     .overflow_y_scroll()
                     .child(group_label("Views"))
                     .child(views)
-                    .child(group_label("Categories"))
-                    .child(categories)
+                    .when(any_visible, |this| this.child(group_label("Categories")).child(categories))
                     .children(schedule),
             )
             .child(footer)

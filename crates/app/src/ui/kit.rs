@@ -8,7 +8,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use yadm_core::{Category, Download, State};
 
-pub const ROW_H: f32 = 36.;
+pub const ROW_H: f32 = 40.;
 
 pub fn state_color(state: State, p: &Palette, cx: &App) -> Hsla {
     match state {
@@ -87,14 +87,14 @@ pub fn kbd_on(keys: &str, fg: Hsla) -> Div {
 fn kbd_colored(keys: &str, fg: Hsla, bg: Hsla) -> Div {
     div()
         .px_1()
-        .h(px(16.))
+        .h(px(18.))
         .flex()
         .items_center()
         .rounded(px(4.))
         .bg(bg)
         .text_color(fg)
-        .text_size(px(11.))
-        .line_height(px(16.))
+        .text_size(px(12.))
+        .line_height(px(18.))
         .child(keys.replace(' ', ""))
 }
 
@@ -103,11 +103,11 @@ pub fn chip(label: impl Into<SharedString>, icon: Option<Lucide>, cx: &App) -> D
     h_flex()
         .gap_1()
         .px_1p5()
-        .h(px(20.))
+        .h(px(22.))
         .rounded_full()
         .border_1()
         .border_color(cx.theme().border)
-        .text_size(px(11.))
+        .text_size(px(12.))
         .text_color(cx.theme().muted_foreground)
         .when_some(icon, |this, i| this.child(Icon::new(i).xsmall()))
         .child(label.into())
@@ -125,7 +125,7 @@ pub fn section_label(text: impl Into<SharedString>, cx: &App) -> Div {
 /// A key/value row in the detail panel property list.
 pub fn property(label: impl Into<SharedString>, value: impl IntoElement, cx: &App) -> Div {
     h_flex()
-        .min_h(px(28.))
+        .min_h(px(30.))
         .gap_3()
         .items_start()
         .child(
@@ -138,4 +138,20 @@ pub fn property(label: impl Into<SharedString>, value: impl IntoElement, cx: &Ap
                 .child(label.into()),
         )
         .child(div().flex_1().min_w_0().pt(px(4.)).text_sm().child(value))
+}
+
+/// Empty strip at the top of a sidebar that clears the macOS traffic lights
+/// and doubles as the window drag area.
+pub fn window_drag_area(id: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .h(px(40.))
+        .flex_shrink_0()
+        .on_mouse_down(MouseButton::Left, |ev: &MouseDownEvent, window, _| {
+            if ev.click_count >= 2 {
+                window.titlebar_double_click();
+            } else {
+                window.start_window_move();
+            }
+        })
 }

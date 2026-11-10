@@ -34,8 +34,8 @@ pub fn extension_dir() -> PathBuf {
 
 pub fn open_main_window(cx: &mut App) {
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::centered(size(px(1180.), px(760.)), cx)),
-        window_min_size: Some(size(px(820.), px(480.))),
+        window_bounds: Some(WindowBounds::centered(size(px(1260.), px(800.)), cx)),
+        window_min_size: Some(size(px(880.), px(520.))),
         titlebar: Some(TitlebarOptions {
             traffic_light_position: Some(point(px(16.), px(14.))),
             ..TitleBar::title_bar_options()

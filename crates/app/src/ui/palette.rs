@@ -35,6 +35,8 @@ pub fn open(view: &mut AppView, window: &mut Window, cx: &mut Context<AppView>) 
             item("Clear completed", Lucide::ListX, Box::new(ClearFinished), &["clean", "remove"]),
             item("Open downloads folder", Lucide::FolderOpen, Box::new(OpenDownloadsFolder), &["finder"]),
             item("Switch theme", Lucide::SunMoon, Box::new(CycleTheme), &["dark", "light", "appearance"]),
+            item("Remove speed limit", Lucide::Gauge, Box::new(SetDownloadLimit { bytes: 0 }), &["bandwidth", "unlimited", "throttle"]),
+            item("Bandwidth settings", Lucide::Gauge, Box::new(OpenBandwidthSettings), &["speed", "limit", "throttle"]),
             item("Settings", Lucide::Settings, Box::new(OpenSettings), &["preferences"]),
         ]);
         let nav = CommandGroup::new().label("Go to").items([

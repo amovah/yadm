@@ -278,7 +278,7 @@ impl AppView {
                 Some(peers) if !peers.is_empty() => v_flex()
                     .children(peers.iter().map(|peer| {
                         h_flex()
-                            .h(px(24.))
+                            .h(px(26.))
                             .gap_2()
                             .text_xs()
                             .child(div().flex_1().truncate().child(format!("{}:{}", peer.ip, peer.port)))
@@ -292,7 +292,7 @@ impl AppView {
                 Some(s) if !s.is_empty() => v_flex()
                     .children(s.iter().map(|srv| {
                         h_flex()
-                            .h(px(24.))
+                            .h(px(26.))
                             .gap_2()
                             .text_xs()
                             .child(div().flex_1().truncate().child(srv.current_uri.clone()))
@@ -323,7 +323,7 @@ impl AppView {
         };
 
         v_flex()
-            .w(px(380.))
+            .w(px(400.))
             .h_full()
             .flex_shrink_0()
             .border_l_1()

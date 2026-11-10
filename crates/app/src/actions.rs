@@ -38,8 +38,16 @@ gpui_kit::actions!(
         OpenDownloadsFolder,
         MoveUp,
         MoveDown,
+        OpenBandwidthSettings,
     ]
 );
+
+/// Sets the global download speed limit (bytes/s, 0 = unlimited).
+#[derive(Clone, PartialEq, Debug, serde::Deserialize, schemars::JsonSchema, gpui_kit::Action)]
+#[action(namespace = yadm)]
+pub struct SetDownloadLimit {
+    pub bytes: u64,
+}
 
 /// Context for bindings that only apply while the download list has focus.
 pub const LIST_CONTEXT: &str = "DownloadList";
@@ -71,6 +79,7 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("space", ToggleDetails, l),
         KeyBinding::new("enter", ToggleDetails, l),
         KeyBinding::new("escape", CloseOverlay, l),
+        KeyBinding::new("escape", CloseOverlay, Some("Settings")),
         KeyBinding::new("p", PauseResume, l),
         KeyBinding::new("r", RetrySelected, l),
         KeyBinding::new("backspace", RemoveSelected, l),

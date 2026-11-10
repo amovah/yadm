@@ -1,6 +1,8 @@
-//! Full-page settings, Linear style: centered column, grouped rows.
+//! Full-window settings, Linear style: its own sidebar of sections with a
+//! search box, and one page per section in the inset panel.
 
-use super::kit::{kbd, section_label};
+use super::kit::{section_label, window_drag_area};
+use crate::actions::{CloseOverlay, FocusSearch};
 use crate::store::AppStore;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
@@ -21,6 +23,83 @@ use yadm_core::{Settings, ThemePref, format};
 pub struct SetRuleAction {
     pub id: String,
     pub kind: String,
+}
+
+/// Asks the owner to leave settings.
+pub enum SettingsEvent {
+    Close,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    General,
+    Appearance,
+    Connections,
+    Bandwidth,
+    Schedule,
+    Browser,
+    Clipboard,
+    Advanced,
+}
+
+impl Section {
+    /// Sidebar groups, in order.
+    const GROUPS: [(&'static str, &'static [Section]); 4] = [
+        ("Preferences", &[Section::General, Section::Appearance]),
+        ("Transfers", &[Section::Connections, Section::Bandwidth, Section::Schedule]),
+        ("Integrations", &[Section::Browser, Section::Clipboard]),
+        ("System", &[Section::Advanced]),
+    ];
+
+    fn all() -> impl Iterator<Item = Section> {
+        Self::GROUPS.iter().flat_map(|(_, s)| s.iter().copied())
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Section::General => "General",
+            Section::Appearance => "Appearance",
+            Section::Connections => "Connections",
+            Section::Bandwidth => "Bandwidth",
+            Section::Schedule => "Schedule",
+            Section::Browser => "Browser",
+            Section::Clipboard => "Clipboard",
+            Section::Advanced => "Advanced",
+        }
+    }
+
+    fn blurb(self) -> &'static str {
+        match self {
+            Section::General => "Where downloads go and how YADM behaves",
+            Section::Appearance => "Theme and menu bar presence",
+            Section::Connections => "How many transfers run and how they connect",
+            Section::Bandwidth => "Speed limits and seeding",
+            Section::Schedule => "Limit or pause downloads at certain times",
+            Section::Browser => "Catch downloads from your browser",
+            Section::Clipboard => "Pick up links you copy",
+            Section::Advanced => "Engine options and files",
+        }
+    }
+
+    fn icon(self) -> Lucide {
+        match self {
+            Section::General => Lucide::Settings,
+            Section::Appearance => Lucide::Palette,
+            Section::Connections => Lucide::Network,
+            Section::Bandwidth => Lucide::Gauge,
+            Section::Schedule => Lucide::CalendarClock,
+            Section::Browser => Lucide::Globe,
+            Section::Clipboard => Lucide::Clipboard,
+            Section::Advanced => Lucide::SquareTerminal,
+        }
+    }
+}
+
+/// One searchable row of a settings page.
+struct Entry {
+    /// Lowercased title, description and keywords.
+    haystack: String,
+    el: AnyElement,
 }
 
 struct RuleRow {
@@ -45,6 +124,11 @@ pub struct SettingsView {
     aria2_options: Entity<TextareaState>,
     rules: Vec<RuleRow>,
     error: Option<String>,
+    section: Section,
+    search: Entity<InputState>,
+    query: String,
+    focus: FocusHandle,
+    scroll: ScrollHandle,
     _subs: Vec<Subscription>,
 }
 
@@ -82,6 +166,30 @@ impl SettingsView {
                 this.commit(window, cx);
             }
         }));
+        // Settings can change elsewhere (sidebar speed menu, theme toggle):
+        // pick those up so a later commit doesn't revert them.
+        subs.push(cx.observe_in(&AppStore::global(cx), window, |this, store, window, cx| {
+            let new = store.read(cx).settings().clone();
+            if new == this.draft {
+                return;
+            }
+            let old = std::mem::replace(&mut this.draft, new.clone());
+            if old.max_download_limit != new.max_download_limit {
+                this.max_down.update(cx, |s, cx| s.set_value(rate_text(new.max_download_limit), window, cx));
+            }
+            if old.max_upload_limit != new.max_upload_limit {
+                this.max_up.update(cx, |s, cx| s.set_value(rate_text(new.max_upload_limit), window, cx));
+            }
+            cx.notify();
+        }));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search settings…"));
+        subs.push(cx.subscribe_in(&search, window, |this, state, ev, _, cx| {
+            if matches!(ev, InputEvent::Change) {
+                this.query = state.read(cx).value().trim().to_lowercase();
+                this.scroll.set_offset(point(px(0.), px(0.)));
+                cx.notify();
+            }
+        }));
         let mut this = Self {
             draft: s,
             max_concurrent,
@@ -96,10 +204,25 @@ impl SettingsView {
             aria2_options,
             rules: vec![],
             error: None,
+            section: Section::General,
+            search,
+            query: String::new(),
+            focus: cx.focus_handle(),
+            scroll: ScrollHandle::new(),
             _subs: subs,
         };
         this.sync_rules(window, cx);
         this
+    }
+
+    pub fn select(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
+        self.section = section;
+        if !self.query.is_empty() {
+            self.search.update(cx, |s, cx| s.set_value("", window, cx));
+            self.query.clear();
+        }
+        self.scroll.set_offset(point(px(0.), px(0.)));
+        cx.notify();
     }
 
     /// Creates input rows for schedule rules that don't have them yet.
@@ -243,24 +366,23 @@ impl SettingsView {
 
     // ---- rendering helpers ------------------------------------------------
 
-    fn group(title: &str, rows: Vec<AnyElement>, cx: &App) -> Div {
+    fn card(rows: impl IntoIterator<Item = AnyElement>, cx: &App) -> Div {
         let theme = cx.theme();
-        v_flex().gap_2().child(section_label(title.to_string(), cx)).child(
-            v_flex()
-                .rounded(px(8.))
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.background)
-                .children(rows.into_iter().enumerate().map(|(i, r)| {
-                    div().when(i > 0, |this| this.border_t_1().border_color(theme.border)).child(r)
-                })),
-        )
+        v_flex()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.background)
+            .children(rows.into_iter().enumerate().map(|(i, r)| {
+                div().when(i > 0, |this| this.border_t_1().border_color(theme.border)).child(r)
+            }))
     }
 
-    fn row(title: &str, description: Option<&str>, control: impl IntoElement, cx: &App) -> AnyElement {
+    fn row(title: &str, description: Option<&str>, keywords: &str, control: impl IntoElement, cx: &App) -> Entry {
         let theme = cx.theme();
-        h_flex()
-            .min_h(px(52.))
+        let haystack = format!("{title} {} {keywords}", description.unwrap_or_default()).to_lowercase();
+        let el = h_flex()
+            .min_h(px(56.))
             .px_4()
             .py_2()
             .gap_4()
@@ -273,7 +395,8 @@ impl SettingsView {
                     .when_some(description, |this, d| this.child(div().text_xs().text_color(theme.muted_foreground).child(d.to_string()))),
             )
             .child(control)
-            .into_any_element()
+            .into_any_element();
+        Entry { haystack, el }
     }
 
     fn switch(&self, id: &'static str, checked: bool, cx: &mut Context<Self>, f: fn(&mut Settings, bool)) -> Switch {
@@ -363,157 +486,301 @@ impl SettingsView {
     }
 }
 
-impl Render for SettingsView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl SettingsView {
+    /// The rows of one section.
+    fn entries(&self, section: Section, cx: &mut Context<Self>) -> Vec<Entry> {
         let theme = cx.theme().clone();
-        let s = self.draft.clone();
-        let dir = s.download_dir.display().to_string().replace(&std::env::var("HOME").unwrap_or_default(), "~");
-
-        let theme_picker = ButtonGroup::new("theme-pref")
-            .small()
-            .outline()
-            .child(Button::new("theme-system").icon(Icon::new(Lucide::Monitor)).label("System").selected(s.theme == ThemePref::System))
-            .child(Button::new("theme-light").icon(Icon::new(Lucide::Sun)).label("Light").selected(s.theme == ThemePref::Light))
-            .child(Button::new("theme-dark").icon(Icon::new(Lucide::Moon)).label("Dark").selected(s.theme == ThemePref::Dark))
-            .on_click(cx.listener(|this, ix: &Vec<usize>, window, cx| {
-                let pref = match ix.first() {
-                    Some(1) => ThemePref::Light,
-                    Some(2) => ThemePref::Dark,
-                    _ => ThemePref::System,
-                };
-                this.edit(window, cx, |s| s.theme = pref);
-            }));
-
-        let general = Self::group(
-            "General",
-            vec![
-                Self::row(
-                    "Download folder",
-                    Some(&dir),
-                    Button::new("pick-download-dir").small().label("Change…").on_click(cx.listener(|this, _, window, cx| this.pick_dir(window, cx))),
-                    cx,
-                ),
-                Self::row("Sort into category folders", Some("Video, Music, Documents… inside the download folder"), self.switch("category-folders", s.category_folders, cx, |s, v| s.category_folders = v), cx),
-                Self::row("Appearance", None, theme_picker, cx),
-                Self::row("Notify when downloads finish", None, self.switch("notify", s.notify_on_complete, cx, |s, v| s.notify_on_complete = v), cx),
-                Self::row("Show in menu bar", Some("Live speed and quick controls"), self.switch("show-tray", s.show_tray, cx, |s, v| s.show_tray = v), cx),
-                Self::row("Keep running when the window closes", None, self.switch("close-to-tray", s.close_to_tray, cx, |s, v| s.close_to_tray = v), cx),
-            ],
-            cx,
-        );
-
+        let s = &self.draft;
         let narrow = |e: &Entity<InputState>| div().w(px(120.)).child(Input::new(e).small());
         let wide = |e: &Entity<InputState>| div().w(px(260.)).child(Input::new(e).small());
-        let connections = Self::group(
-            "Connections",
-            vec![
-                Self::row("Concurrent downloads", Some("How many downloads run at once"), narrow(&self.max_concurrent), cx),
-                Self::row("Connections per download", Some("Splits a file into this many segments"), narrow(&self.split), cx),
-                Self::row("Connections per server", None, narrow(&self.per_server), cx),
-                Self::row("User agent", None, wide(&self.user_agent), cx),
-                Self::row("Proxy", Some("Used for every protocol"), wide(&self.proxy), cx),
+        match section {
+            Section::General => {
+                let dir = s.download_dir.display().to_string().replace(&std::env::var("HOME").unwrap_or_default(), "~");
+                vec![
+                    Self::row(
+                        "Download folder",
+                        Some(&dir),
+                        "location path directory save",
+                        Button::new("pick-download-dir").small().label("Change…").on_click(cx.listener(|this, _, window, cx| this.pick_dir(window, cx))),
+                        cx,
+                    ),
+                    Self::row("Save in category folders", Some("Video, Music, Documents… inside the download folder"), "organize sort store", self.switch("category-folders", s.category_folders, cx, |s, v| s.category_folders = v), cx),
+                    Self::row("Notify when downloads finish", None, "notification alert complete", self.switch("notify", s.notify_on_complete, cx, |s, v| s.notify_on_complete = v), cx),
+                    Self::row("Keep running when the window closes", None, "background quit close tray", self.switch("close-to-tray", s.close_to_tray, cx, |s, v| s.close_to_tray = v), cx),
+                ]
+            }
+            Section::Appearance => {
+                let theme_picker = ButtonGroup::new("theme-pref")
+                    .small()
+                    .outline()
+                    .child(Button::new("theme-system").icon(Icon::new(Lucide::Monitor)).label("System").selected(s.theme == ThemePref::System))
+                    .child(Button::new("theme-light").icon(Icon::new(Lucide::Sun)).label("Light").selected(s.theme == ThemePref::Light))
+                    .child(Button::new("theme-dark").icon(Icon::new(Lucide::Moon)).label("Dark").selected(s.theme == ThemePref::Dark))
+                    .on_click(cx.listener(|this, ix: &Vec<usize>, window, cx| {
+                        let pref = match ix.first() {
+                            Some(1) => ThemePref::Light,
+                            Some(2) => ThemePref::Dark,
+                            _ => ThemePref::System,
+                        };
+                        this.edit(window, cx, |s| s.theme = pref);
+                    }));
+                vec![
+                    Self::row("Theme", Some("Follow the system, or always light or dark"), "appearance dark mode light mode color", theme_picker, cx),
+                    Self::row("Show in menu bar", Some("Live speed and quick controls"), "tray status icon", self.switch("show-tray", s.show_tray, cx, |s, v| s.show_tray = v), cx),
+                ]
+            }
+            Section::Connections => vec![
+                Self::row("Concurrent downloads", Some("How many downloads run at once"), "parallel simultaneous max", narrow(&self.max_concurrent), cx),
+                Self::row("Connections per download", Some("Splits a file into this many segments"), "split segments threads", narrow(&self.split), cx),
+                Self::row("Connections per server", None, "max host", narrow(&self.per_server), cx),
+                Self::row("User agent", None, "browser header ua", wide(&self.user_agent), cx),
+                Self::row("Proxy", Some("Used for every protocol"), "http socks network", wide(&self.proxy), cx),
             ],
-            cx,
-        );
-
-        let bandwidth = Self::group(
-            "Bandwidth",
-            vec![
-                Self::row("Download limit", Some("Empty for unlimited · 500K, 2M"), narrow(&self.max_down), cx),
-                Self::row("Upload limit", Some("Applies to torrents"), narrow(&self.max_up), cx),
-                Self::row("Seed ratio", Some("Stop seeding at this upload/download ratio"), narrow(&self.seed_ratio), cx),
+            Section::Bandwidth => vec![
+                Self::row("Download limit", Some("Empty for unlimited · 500K, 2M"), "speed rate throttle cap", narrow(&self.max_down), cx),
+                Self::row("Upload limit", Some("Applies to torrents"), "speed rate throttle cap", narrow(&self.max_up), cx),
+                Self::row("Seed ratio", Some("Stop seeding at this upload/download ratio"), "torrent bittorrent", narrow(&self.seed_ratio), cx),
             ],
-            cx,
-        );
-
-        let rules: Vec<AnyElement> = s.schedule.iter().map(|r| self.render_rule(r, cx)).collect();
-        let mut schedule_rows = rules;
-        schedule_rows.push(
-            h_flex()
-                .px_4()
-                .py_2()
-                .child(Button::new("add-rule").ghost().small().icon(Icon::new(Lucide::Plus)).label("Add rule").on_click(cx.listener(|this, _, window, cx| {
-                    this.edit(window, cx, |s| {
-                        s.schedule.push(ScheduleRule::new("Work hours", ScheduleAction::Limit { down: 512 * 1024, up: 0 }))
-                    });
-                    this.sync_rules(window, cx);
-                })))
-                .into_any_element(),
-        );
-        let schedule = Self::group("Schedule", schedule_rows, cx);
-
-        let token = s.bridge.token.clone();
-        let ext_dir = crate::extension_dir();
-        let browser = Self::group(
-            "Browser",
-            vec![
-                Self::row("Catch browser downloads", Some("Requires the YADM browser extension"), self.switch("bridge", s.bridge.enabled, cx, |s, v| s.bridge.enabled = v), cx),
-                Self::row("Start without asking", Some("Otherwise YADM shows the New download dialog"), self.switch("bridge-auto", s.bridge.auto_start, cx, |s, v| s.bridge.auto_start = v), cx),
-                Self::row("Port", None, narrow(&self.port), cx),
-                Self::row(
-                    "Pairing token",
-                    Some("Paste this into the extension's options"),
-                    h_flex()
-                        .gap_1()
-                        .child(div().px_2().py_1().rounded(px(4.)).bg(theme.muted).font_family(theme.mono_font_family.clone()).text_xs().child(token.clone()))
-                        .child(Button::new("copy-token").ghost().small().icon(Icon::new(Lucide::Copy)).tooltip("Copy").on_click(move |_, window, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(token.clone()));
-                            window.push_notification(Notification::info("Token copied"), cx);
-                        }))
-                        .child(Button::new("regen-token").ghost().small().icon(Icon::new(Lucide::RefreshCw)).tooltip("Generate a new token").on_click(
-                            cx.listener(|this, _, window, cx| this.edit(window, cx, |s| s.bridge.token = new_token())),
-                        )),
-                    cx,
-                ),
-                Self::row(
-                    "Install the extension",
-                    Some("Chrome: chrome://extensions → Developer mode → Load unpacked"),
-                    Button::new("reveal-ext").small().label("Show folder").on_click(move |_, _, cx| cx.reveal_path(&ext_dir)),
-                    cx,
-                ),
-            ],
-            cx,
-        );
-
-        let clipboard = Self::group(
-            "Clipboard",
-            vec![Self::row(
+            Section::Schedule => {
+                let mut rows: Vec<Entry> = s
+                    .schedule
+                    .iter()
+                    .map(|r| Entry {
+                        haystack: format!("{} schedule rule time {}", r.name, r.action.label()).to_lowercase(),
+                        el: self.render_rule(r, cx),
+                    })
+                    .collect();
+                rows.push(Entry {
+                    haystack: "add rule schedule time limit pause window".into(),
+                    el: h_flex()
+                        .px_4()
+                        .py_2()
+                        .child(Button::new("add-rule").ghost().small().icon(Icon::new(Lucide::Plus)).label("Add rule").on_click(cx.listener(|this, _, window, cx| {
+                            this.edit(window, cx, |s| s.schedule.push(ScheduleRule::new("Work hours", ScheduleAction::Limit { down: 512 * 1024, up: 0 })));
+                            this.sync_rules(window, cx);
+                        })))
+                        .into_any_element(),
+                });
+                rows
+            }
+            Section::Browser => {
+                let token = s.bridge.token.clone();
+                let ext_dir = crate::extension_dir();
+                vec![
+                    Self::row("Catch browser downloads", Some("Requires the YADM browser extension"), "bridge chrome firefox intercept", self.switch("bridge", s.bridge.enabled, cx, |s, v| s.bridge.enabled = v), cx),
+                    Self::row("Start without asking", Some("Otherwise YADM shows the New download dialog"), "auto start confirm", self.switch("bridge-auto", s.bridge.auto_start, cx, |s, v| s.bridge.auto_start = v), cx),
+                    Self::row("Port", None, "bridge extension network", narrow(&self.port), cx),
+                    Self::row(
+                        "Pairing token",
+                        Some("Paste this into the extension's options"),
+                        "extension secret key",
+                        h_flex()
+                            .gap_1()
+                            .child(div().px_2().py_1().rounded(px(4.)).bg(theme.muted).font_family(theme.mono_font_family.clone()).text_xs().child(token.clone()))
+                            .child(Button::new("copy-token").ghost().small().icon(Icon::new(Lucide::Copy)).tooltip("Copy").on_click(move |_, window, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(token.clone()));
+                                window.push_notification(Notification::info("Token copied"), cx);
+                            }))
+                            .child(Button::new("regen-token").ghost().small().icon(Icon::new(Lucide::RefreshCw)).tooltip("Generate a new token").on_click(
+                                cx.listener(|this, _, window, cx| this.edit(window, cx, |s| s.bridge.token = new_token())),
+                            )),
+                        cx,
+                    ),
+                    Self::row(
+                        "Install the extension",
+                        Some("Chrome: chrome://extensions → Developer mode → Load unpacked"),
+                        "chrome setup",
+                        Button::new("reveal-ext").small().label("Show folder").on_click(move |_, _, cx| cx.reveal_path(&ext_dir)),
+                        cx,
+                    ),
+                ]
+            }
+            Section::Clipboard => vec![Self::row(
                 "Offer to download copied links",
                 Some("Watches the clipboard for links to files and magnets"),
+                "monitor paste url magnet",
                 self.switch("clipboard", s.clipboard_monitor, cx, |s, v| s.clipboard_monitor = v),
                 cx,
             )],
-            cx,
+            Section::Advanced => {
+                let data_dir = yadm_core::Paths::system().data_dir;
+                let log = yadm_core::Paths::system().engine_dir().join("aria2.log");
+                vec![
+                    Entry {
+                        haystack: "aria2 options engine global min-split-size advanced".into(),
+                        el: v_flex()
+                            .px_4()
+                            .py_3()
+                            .gap_2()
+                            .child(div().text_sm().child("aria2 options"))
+                            .child(div().text_xs().text_color(theme.muted_foreground).child("Applied to the engine globally, e.g. min-split-size=4M. RPC options are ignored."))
+                            .child(Textarea::new(&self.aria2_options).h(px(90.)))
+                            .into_any_element(),
+                    },
+                    Self::row(
+                        "Engine files",
+                        None,
+                        "log data folder debug",
+                        h_flex()
+                            .gap_1()
+                            .child(Button::new("open-log").small().label("Engine log").on_click(move |_, _, cx| cx.open_with_system(&log)))
+                            .child(Button::new("open-data").small().label("Data folder").on_click(move |_, _, cx| cx.reveal_path(&data_dir))),
+                        cx,
+                    ),
+                ]
+            }
+        }
+    }
+
+    /// Entries of `section` matching the current query (all when it's empty).
+    fn matching(&self, section: Section, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let q = self.query.clone();
+        let section_hit = section.label().to_lowercase().contains(&q);
+        self.entries(section, cx)
+            .into_iter()
+            .filter(|e| q.is_empty() || section_hit || e.haystack.contains(&q))
+            .map(|e| e.el)
+            .collect()
+    }
+
+    fn match_count(&self, section: Section, cx: &mut Context<Self>) -> usize {
+        let q = &self.query;
+        if section.label().to_lowercase().contains(q.as_str()) {
+            return self.entries(section, cx).len();
+        }
+        self.entries(section, cx).iter().filter(|e| e.haystack.contains(q.as_str())).count()
+    }
+
+    fn render_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let searching = !self.query.is_empty();
+
+        let back = h_flex()
+            .id("settings-back")
+            .mx_2()
+            .h(px(30.))
+            .px_2()
+            .gap_2()
+            .rounded(px(6.))
+            .cursor_pointer()
+            .text_color(theme.muted_foreground)
+            .hover(|this| this.bg(theme.sidebar_accent).text_color(theme.foreground))
+            .child(Icon::new(Lucide::ChevronLeft).small())
+            .child("Back to app")
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Close)));
+
+        let search = div().px_2().pt_2().child(
+            Input::new(&self.search)
+                .small()
+                .prefix(Icon::new(Lucide::Search).xsmall().text_color(theme.muted_foreground))
+                .cleanable(true),
         );
 
-        let data_dir = yadm_core::Paths::system().data_dir;
-        let log = yadm_core::Paths::system().engine_dir().join("aria2.log");
-        let advanced = Self::group(
-            "Advanced",
-            vec![
-                v_flex()
-                    .px_4()
-                    .py_3()
-                    .gap_2()
-                    .child(div().text_sm().child("aria2 options"))
-                    .child(div().text_xs().text_color(theme.muted_foreground).child("Applied to the engine globally, e.g. min-split-size=4M. RPC options are ignored."))
-                    .child(Textarea::new(&self.aria2_options).h(px(90.)))
-                    .into_any_element(),
-                Self::row(
-                    "Engine files",
-                    None,
+        let mut groups = v_flex().px_2().pb_2();
+        for (label, sections) in Section::GROUPS {
+            groups = groups.child(
+                div()
+                    .px_2()
+                    .pt_4()
+                    .pb_1()
+                    .text_xs()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.muted_foreground)
+                    .child(label),
+            );
+            for &section in sections {
+                let hits = if searching { self.match_count(section, cx) } else { 0 };
+                let active = !searching && self.section == section;
+                let dim = searching && hits == 0;
+                groups = groups.child(
                     h_flex()
-                        .gap_1()
-                        .child(Button::new("open-log").small().label("Engine log").on_click(move |_, _, cx| cx.open_with_system(&log)))
-                        .child(Button::new("open-data").small().label("Data folder").on_click(move |_, _, cx| cx.reveal_path(&data_dir))),
-                    cx,
-                ),
-            ],
-            cx,
-        );
+                        .id(ElementId::Name(format!("settings-nav-{}", section.label()).into()))
+                        .h(px(30.))
+                        .px_2()
+                        .gap_2()
+                        .rounded(px(6.))
+                        .cursor_pointer()
+                        .text_color(if active { theme.sidebar_accent_foreground } else { theme.sidebar_foreground })
+                        .when(active, |this| this.bg(theme.sidebar_accent))
+                        .when(dim, |this| this.opacity(0.45))
+                        .hover(|this| this.bg(theme.sidebar_accent))
+                        .child(Icon::new(section.icon()).small().text_color(theme.muted_foreground))
+                        .child(div().flex_1().truncate().child(section.label()))
+                        .when(searching && hits > 0, |this| this.child(div().text_xs().text_color(theme.muted_foreground).child(hits.to_string())))
+                        .on_click(cx.listener(move |this, _, window, cx| this.select(section, window, cx))),
+                );
+            }
+        }
 
-        let _ = window;
         v_flex()
+            .w(px(248.))
+            .h_full()
+            .flex_shrink_0()
+            .bg(theme.sidebar)
+            .child(window_drag_area("settings-titlebar"))
+            .child(back)
+            .child(search)
+            .child(div().id("settings-nav-scroll").flex_1().overflow_y_scroll().child(groups))
+            .into_any_element()
+    }
+
+    fn render_page(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        let column = v_flex().w_full().max_w(px(720.)).mx_auto().px_6().pt_10().pb_8().when_some(self.error.clone(), |this, e| {
+            this.child(div().mb_6().p_2().rounded(px(6.)).bg(theme.danger.opacity(0.1)).text_sm().text_color(theme.danger).child(e))
+        });
+
+        if self.query.is_empty() {
+            let section = self.section;
+            let rows = self.matching(section, cx);
+            return column
+                .child(div().text_xl().font_weight(FontWeight::SEMIBOLD).child(section.label()))
+                .child(div().mt_1().mb_8().text_sm().text_color(theme.muted_foreground).child(section.blurb()))
+                .child(Self::card(rows, cx));
+        }
+
+        let results: Vec<(Section, Vec<AnyElement>)> =
+            Section::all().map(|s| (s, self.matching(s, cx))).filter(|(_, rows)| !rows.is_empty()).collect();
+        let total: usize = results.iter().map(|(_, r)| r.len()).sum();
+        let raw_query = self.search.read(cx).value().trim().to_string();
+        let column = column.child(div().text_xl().font_weight(FontWeight::SEMIBOLD).child("Search")).child(
+            div().mt_1().mb_8().text_sm().text_color(theme.muted_foreground).child(match total {
+                0 => format!("No settings match “{raw_query}”"),
+                1 => format!("1 result for “{raw_query}”"),
+                n => format!("{n} results for “{raw_query}”"),
+            }),
+        );
+        column.child(v_flex().gap_8().children(results.into_iter().map(|(section, rows)| {
+            v_flex()
+                .gap_2()
+                .child(
+                    h_flex()
+                        .id(ElementId::Name(format!("settings-result-{}", section.label()).into()))
+                        .gap_1p5()
+                        .cursor_pointer()
+                        .child(Icon::new(section.icon()).xsmall().text_color(theme.muted_foreground))
+                        .child(section_label(section.label(), cx))
+                        .on_click(cx.listener(move |this, _, window, cx| this.select(section, window, cx))),
+                )
+                .child(Self::card(rows, cx))
+        })))
+    }
+}
+
+impl EventEmitter<SettingsEvent> for SettingsView {}
+
+impl Focusable for SettingsView {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
+impl Render for SettingsView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        h_flex()
+            .key_context("Settings")
+            .track_focus(&self.focus)
             .size_full()
             .on_action(cx.listener(|this, a: &SetRuleAction, window, cx| {
                 let id = a.id.clone();
@@ -528,37 +795,30 @@ impl Render for SettingsView {
                     }
                 });
             }))
+            .on_action(cx.listener(|this, _: &FocusSearch, window, cx| this.search.update(cx, |s, cx| s.focus(window, cx))))
+            .on_action(cx.listener(|this, _: &CloseOverlay, window, cx| {
+                if this.query.is_empty() {
+                    cx.emit(SettingsEvent::Close);
+                } else {
+                    this.search.update(cx, |s, cx| s.set_value("", window, cx));
+                    this.query.clear();
+                    this.focus.focus(window, cx);
+                    cx.notify();
+                }
+            }))
+            .child(self.render_sidebar(cx))
             .child(
-                h_flex()
-                    .h(px(44.))
-                    .flex_shrink_0()
-                    .px_4()
-                    .gap_2()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .child(div().font_weight(FontWeight::MEDIUM).child("Settings"))
-                    .child(div().flex_1())
-                    .child(kbd("⌘ ,", cx)),
-            )
-            .child(
-                div().id("settings-scroll").flex_1().overflow_y_scroll().child(
-                    v_flex()
-                        .w_full()
-                        .max_w(px(680.))
-                        .mx_auto()
-                        .px_6()
-                        .py_8()
-                        .gap_8()
-                        .when_some(self.error.clone(), |this, e| {
-                            this.child(div().p_2().rounded(px(6.)).bg(theme.danger.opacity(0.1)).text_sm().text_color(theme.danger).child(e))
-                        })
-                        .child(general)
-                        .child(connections)
-                        .child(bandwidth)
-                        .child(schedule)
-                        .child(browser)
-                        .child(clipboard)
-                        .child(advanced),
+                div().flex_1().min_w_0().h_full().py_2().pr_2().child(
+                    div()
+                        .id("settings-scroll")
+                        .size_full()
+                        .rounded(px(10.))
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.background)
+                        .overflow_y_scroll()
+                        .track_scroll(&self.scroll)
+                        .child(self.render_page(cx)),
                 ),
             )
     }

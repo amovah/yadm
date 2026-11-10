@@ -1,6 +1,6 @@
 //! The grouped, virtualized download list with Linear-style rows.
 
-use super::kit::{ROW_H, category_icon, chip, kbd, progress_bar, state_color, state_icon, status_glyph};
+use super::kit::{ROW_H, category_icon, chip, kbd, kbd_on, progress_bar, state_color, state_icon, status_glyph};
 use super::root::{AppView, GroupBy, GroupKey, Nav, Row};
 use crate::actions::{self, *};
 use crate::theme::palette;
@@ -101,7 +101,7 @@ impl AppView {
                 // Selection rail, like Linear's checkbox gutter.
                 div()
                     .w(px(2.))
-                    .h(px(18.))
+                    .h(px(20.))
                     .rounded_full()
                     .when(selected || is_cursor, |this| this.bg(p.accent)),
             )
@@ -220,7 +220,7 @@ impl AppView {
         };
         let group_by = self.group_by;
         h_flex()
-            .h(px(44.))
+            .h(px(48.))
             .flex_shrink_0()
             .px_4()
             .gap_2()
@@ -318,7 +318,7 @@ impl AppView {
                     Button::new("empty-add")
                         .primary()
                         .small()
-                        .label("New download")
+                        .child(h_flex().gap_1p5().child("New download").child(kbd_on("⌘N", theme.primary_foreground)))
                         .on_click(|_, window, cx| window.dispatch_action(Box::new(NewDownload), cx)),
                 )
             })

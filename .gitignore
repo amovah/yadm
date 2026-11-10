@@ -1,0 +1,4 @@
+/target
+/dist
+/vendor/aria2c
+.DS_Store

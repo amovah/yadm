@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>YADM</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#1b1c1f; --muted:#6b6f76; --border:#e8e8eb; --accent:#5e6ad2; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#101113; --fg:#e3e4e6; --muted:#8a8f98; --border:#1f2023; } }
+  body { font: 13px -apple-system, BlinkMacSystemFont, "Inter", sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 16px; min-width: 320px; }
+  h1 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
+  label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 12px; }
+  input[type=text], input[type=number], input[type=password] { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: inherit; }
+  .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #status { margin-left: auto; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>YADM</h1>
+  <div class="row"><input type="checkbox" id="enabled"><span>Send downloads to YADM</span></div>
+  <label for="token">Pairing token (YADM → Settings → Browser)</label>
+  <input type="password" id="token" autocomplete="off">
+  <label for="port">Port</label>
+  <input type="number" id="port" min="1024" max="65535">
+  <label for="minSizeMB">Ignore files smaller than (MB, 0 = none)</label>
+  <input type="number" id="minSizeMB" min="0">
+  <label for="skipTypes">Never send these extensions (comma separated)</label>
+  <input type="text" id="skipTypes" placeholder="html, json">
+  <div class="row">
+    <button id="test">Test connection</button>
+    <button id="save" class="primary">Save</button>
+    <span id="status"></span>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

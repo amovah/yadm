@@ -1,0 +1,19 @@
+[package]
+name = "yadm-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Localhost HTTP endpoint that receives downloads from the YADM browser extension"
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+async-channel.workspace = true
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+tower-http = { version = "0.6", features = ["cors"] }
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json"] }

@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = ["crates/aria2", "crates/core", "crates/bridge", "crates/app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+yadm-aria2 = { path = "crates/aria2" }
+yadm-core = { path = "crates/core" }
+yadm-bridge = { path = "crates/bridge" }
+anyhow = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "sync", "net", "fs", "io-util"] }
+tokio-tungstenite = "0.26"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rand = "0.9"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4", "serde"] }
+async-channel = "2"
+chrono = { version = "0.4", features = ["serde"] }
+
+[profile.dev.package."*"]
+opt-level = 2

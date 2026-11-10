@@ -40,7 +40,7 @@ impl AppView {
                     .text_color(icon_color.unwrap_or(theme.muted_foreground)),
             )
             .child(div().flex_1().truncate().child(label))
-            .when_some(count.filter(|c| *c > 0), |this, c| {
+            .when_some(count, |this, c| {
                 this.child(div().text_xs().text_color(theme.muted_foreground).child(c.to_string()))
             })
             .on_click(cx.listener(move |this, _, window, cx| this.set_nav(nav, window, cx)))
@@ -79,7 +79,7 @@ impl AppView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(Icon::new(Lucide::ArrowDownToLine).xsmall().text_color(white())),
+                    .child(Icon::new(Lucide::CircleArrowDown).xsmall().text_color(white())),
             )
             .child(div().font_weight(FontWeight::SEMIBOLD).child("YADM"));
 
@@ -130,7 +130,7 @@ impl AppView {
                 .child(label)
         };
 
-        let mut view_items = vec![self.nav_item("nav-all", Lucide::Inbox, None, "All downloads".into(), Some(snap.downloads.len()), Nav::All, cx)];
+        let mut view_items = vec![self.nav_item("nav-all", Lucide::Inbox, None, "All downloads".into(), Some(snap.downloads.len()).filter(|c| *c > 0), Nav::All, cx)];
         for s in State::GROUPS {
                 let id: &'static str = match s {
                     State::Active => "nav-active",
@@ -140,18 +140,45 @@ impl AppView {
                     _ => "nav-completed",
                 };
             let color = state_color(s, &p, cx);
-            view_items.push(self.nav_item(id, state_icon(s), Some(color), Nav::State(s).title().into(), Some(count_state(s)), Nav::State(s), cx));
+            view_items.push(self.nav_item(id, state_icon(s), Some(color), Nav::State(s).title().into(), Some(count_state(s)).filter(|c| *c > 0), Nav::State(s), cx));
         }
         let views = v_flex().px_2().gap_px().children(view_items);
 
+        // Categories with downloads (or the one being viewed) are always listed;
+        // empty ones hide behind a "Show N more" toggle.
         let mut cat_items = vec![];
+        let mut hidden = 0;
         for c in Category::ALL {
-            if count_cat(c) > 0 || matches!(c, Category::Video | Category::Software | Category::Documents) {
-                let id = ElementId::Name(format!("nav-cat-{}", c.as_str()).into());
-                cat_items.push(self.nav_item(id, category_icon(c), None, c.label().into(), Some(count_cat(c)), Nav::Category(c), cx));
+            let n = count_cat(c);
+            let visible = n > 0 || self.nav == Nav::Category(c);
+            if !visible {
+                hidden += 1;
+                if !self.show_empty_categories {
+                    continue;
+                }
             }
+            let id = ElementId::Name(format!("nav-cat-{}", c.as_str()).into());
+            cat_items.push(self.nav_item(id, category_icon(c), None, c.label().into(), Some(n), Nav::Category(c), cx));
         }
-        let categories = v_flex().px_2().gap_px().children(cat_items);
+        let expanded = self.show_empty_categories;
+        let toggle = (hidden > 0).then(|| {
+            h_flex()
+                .id("nav-cat-toggle")
+                .h(px(28.))
+                .px_2()
+                .gap_2()
+                .rounded(px(6.))
+                .cursor_pointer()
+                .text_color(theme.muted_foreground)
+                .hover(|this| this.bg(theme.sidebar_accent))
+                .child(Icon::new(if expanded { Lucide::ChevronUp } else { Lucide::ChevronDown }).small())
+                .child(if expanded { "Show less".to_string() } else { format!("Show {hidden} more") })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.show_empty_categories = !this.show_empty_categories;
+                    cx.notify();
+                }))
+        });
+        let categories = v_flex().px_2().gap_px().children(cat_items).children(toggle);
 
         let schedule = snap.schedule.clone().map(|label| {
             h_flex()

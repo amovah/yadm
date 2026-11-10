@@ -18,12 +18,12 @@ cp target/release/yadm "$APP/Contents/MacOS/YADM"
 cp "$ARIA2C" "$APP/Contents/MacOS/aria2c"
 cp -R extension "$APP/Contents/Resources/extension"
 
-# App icon from the extension artwork.
+# App icon (assets/icon.svg, rasterized to assets/icon.png).
 ICONSET="$(mktemp -d)/YADM.iconset"
 mkdir -p "$ICONSET"
 for s in 16 32 128 256 512; do
-  sips -z $s $s extension/icon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-  sips -z $((s*2)) $((s*2)) extension/icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+  sips -z $s $s assets/icon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+  sips -z $((s*2)) $((s*2)) assets/icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/YADM.icns"
 

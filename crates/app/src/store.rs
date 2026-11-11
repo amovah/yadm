@@ -1,9 +1,8 @@
 //! The UI-side mirror of engine state. One entity per app; views observe it.
 
 use gpui_kit::{App, AppContext as _, AsyncApp, Context, Entity, EventEmitter, Global};
-use std::collections::HashMap;
 use std::sync::Arc;
-use yadm_core::{AddRequest, Command, Details, Download, EngineHandle, Event, Settings, Snapshot, ToastKind};
+use yadm_core::{AddRequest, Command, Download, EngineHandle, Event, Settings, Snapshot, ToastKind};
 
 pub enum StoreEvent {
     Toast(ToastKind, String),
@@ -16,7 +15,6 @@ pub struct AppStore {
     engine: EngineHandle,
     snapshot: Arc<Snapshot>,
     settings: Settings,
-    details: HashMap<String, Details>,
 }
 
 impl EventEmitter<StoreEvent> for AppStore {}
@@ -27,7 +25,7 @@ impl Global for GlobalStore {}
 
 impl AppStore {
     pub fn new(engine: EngineHandle, settings: Settings) -> Self {
-        Self { engine, snapshot: Arc::new(Snapshot::default()), settings, details: HashMap::new() }
+        Self { engine, snapshot: Arc::new(Snapshot::default()), settings }
     }
 
     pub fn global(cx: &App) -> Entity<AppStore> {
@@ -40,10 +38,6 @@ impl AppStore {
 
     pub fn settings(&self) -> &Settings {
         &self.settings
-    }
-
-    pub fn details(&self, id: &str) -> Option<&Details> {
-        self.details.get(id)
     }
 
     pub fn download(&self, id: &str) -> Option<&Download> {
@@ -73,10 +67,7 @@ impl AppStore {
                 self.snapshot = s;
                 cx.notify();
             }
-            Event::Details(d) => {
-                self.details.insert(d.id.clone(), *d);
-                cx.notify();
-            }
+            Event::Details(_) => {}
             Event::Completed { id, name } => cx.emit(StoreEvent::Completed { id, name }),
             Event::Failed { name, error, .. } => cx.emit(StoreEvent::Failed { name, error }),
             Event::Toast { kind, message } => cx.emit(StoreEvent::Toast(kind, message)),

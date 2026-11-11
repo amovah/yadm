@@ -65,7 +65,10 @@ impl AppView {
             .border_color(theme.border)
             .text_sm()
             .child(stat(Lucide::ArrowDown, p.accent, format::speed(snap.global.dl_speed)))
-            .child(stat(Lucide::ArrowUp, p.green, format::speed(snap.global.ul_speed)).text_color(theme.muted_foreground))
+            // Upload only happens while torrents download or seed.
+            .when(snap.global.ul_speed > 0, |this| {
+                this.child(stat(Lucide::ArrowUp, p.green, format::speed(snap.global.ul_speed)).text_color(theme.muted_foreground))
+            })
             .when_some(counts, |this, c| this.child(div().text_color(theme.muted_foreground).child(c)))
             .child(div().flex_1())
             .child(limit_button)

@@ -2,7 +2,7 @@
 
 use super::kit::{category_icon, state_color, state_icon, window_drag_area};
 use super::root::{AppView, Nav};
-use crate::actions::{CycleTheme, HideWindow, NewDownload, OpenCommandPalette, OpenDownloadsFolder, OpenSettings, Quit};
+use crate::actions::{HideWindow, NewDownload, OpenCommandPalette, OpenDownloadsFolder, OpenSettings, Quit};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::DropdownMenu as _;
 use crate::theme::palette;
@@ -73,7 +73,6 @@ impl AppView {
             )
             .dropdown_menu(|menu, _, _| {
                 menu.menu("Settings…", Box::new(OpenSettings))
-                    .menu("Switch theme", Box::new(CycleTheme))
                     .menu("Open downloads folder", Box::new(OpenDownloadsFolder))
                     .separator()
                     .menu("Hide YADM", Box::new(HideWindow))

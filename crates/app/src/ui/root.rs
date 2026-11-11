@@ -76,7 +76,6 @@ pub struct AppView {
     pub(super) cursor: Option<String>,
     pub(super) selected: BTreeSet<String>,
     pub(super) detail_open: bool,
-    pub(super) detail_tab: usize,
     pub(super) scroll: UniformListScrollHandle,
     pub(super) settings_view: Option<Entity<SettingsView>>,
     pub(super) show_empty_categories: bool,
@@ -128,7 +127,7 @@ impl AppView {
             focus: cx.focus_handle(),
             nav: Nav::All,
             prev_nav: Nav::All,
-            group_by: GroupBy::Status,
+            group_by: GroupBy::None,
             collapsed: HashSet::new(),
             search,
             query: String::new(),
@@ -137,7 +136,6 @@ impl AppView {
             cursor: None,
             selected: BTreeSet::new(),
             detail_open: false,
-            detail_tab: 0,
             scroll: UniformListScrollHandle::new(),
             settings_view: None,
             show_empty_categories: false,
@@ -153,11 +151,6 @@ impl AppView {
     }
 
     fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.detail_open
-            && let Some(id) = self.cursor.clone()
-        {
-            self.store.read(cx).send(Command::RequestDetails(id));
-        }
         self.watch_clipboard(window, cx);
     }
 
@@ -370,49 +363,72 @@ impl AppView {
             self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
         }
         self.cursor = Some(id);
-        if self.detail_open {
-            self.request_details(cx);
-        }
         cx.notify();
     }
 
-    pub(super) fn request_details(&self, cx: &mut Context<Self>) {
-        if let Some(id) = &self.cursor {
-            self.store.read(cx).send(Command::RequestDetails(id.clone()));
-        }
-    }
-
+    /// Removes downloads. Unfinished ones always lose their partial files (there
+    /// is nothing useful to keep); finished ones lose their files only when
+    /// `delete_files` is set.
     pub(super) fn confirm_remove(&mut self, ids: Vec<String>, delete_files: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if ids.is_empty() {
-            return;
-        }
         let store = self.store.clone();
         let snapshot = store.read(cx).snapshot().clone();
-        let names: Vec<_> = ids.iter().filter_map(|id| snapshot.downloads.iter().find(|d| &d.id == id)).map(|d| d.name.clone()).collect();
-        let title = if names.len() == 1 { format!("Remove “{}”?", names[0]) } else { format!("Remove {} downloads?", names.len()) };
-        let finished_only = ids.iter().all(|id| snapshot.downloads.iter().any(|d| &d.id == id && !d.state.is_live()));
-        if !delete_files && finished_only {
-            // Removing finished items from the list is harmless; don't ask.
-            store.read(cx).send(Command::Remove { ids, delete_files: false });
+        let items: Vec<_> = ids.iter().filter_map(|id| snapshot.downloads.iter().find(|d| &d.id == id)).collect();
+        if items.is_empty() {
             return;
         }
-        let description = if delete_files {
-            if cfg!(windows) { "The downloaded files will be moved to the Recycle Bin." } else { "The downloaded files will be moved to the Trash." }
+        let (finished, unfinished): (Vec<&Download>, Vec<&Download>) = items.iter().copied().partition(|d| d.state == State::Completed);
+        let finished: Vec<String> = finished.iter().map(|d| d.id.clone()).collect();
+        let unfinished: Vec<String> = unfinished.iter().map(|d| d.id.clone()).collect();
+        if unfinished.is_empty() && !delete_files {
+            // Dropping finished items from the list is harmless; don't ask.
+            store.read(cx).send(Command::Remove { ids: finished, delete_files: false });
+            return;
+        }
+
+        let trash = crate::platform::TRASH;
+        let n = items.len();
+        let title = match (n, unfinished.is_empty(), delete_files) {
+            (1, false, _) => format!("Cancel “{}”?", items[0].name),
+            (1, true, _) => format!("Delete “{}”?", items[0].name),
+            (_, false, _) if finished.is_empty() => format!("Cancel {n} downloads?"),
+            (_, true, _) => format!("Delete {n} downloads?"),
+            _ => format!("Remove {n} downloads?"),
+        };
+        let description = if finished.is_empty() {
+            format!("The download stops and its partial files are moved to the {trash}.")
+        } else if unfinished.is_empty() {
+            format!("The downloaded files are moved to the {trash}.")
+        } else if delete_files {
+            format!("Unfinished downloads stop. All their files are moved to the {trash}.")
         } else {
-            "Transfers stop and partial files stay on disk."
+            format!("Unfinished downloads stop and their partial files are moved to the {trash}. Finished files stay on disk.")
+        };
+        let ok_text = if finished.is_empty() {
+            if n == 1 { "Cancel download" } else { "Cancel downloads" }
+        } else if delete_files {
+            "Delete"
+        } else {
+            "Remove"
         };
         window.open_alert_dialog(cx, move |alert, _, _| {
-            let ids = ids.clone();
+            let (finished, unfinished) = (finished.clone(), unfinished.clone());
             let store = store.clone();
             alert
                 .entrance(gpui_kit::component::dialog::DialogEntrance::None)
                 .title(title.clone())
-                .description(description)
+                .description(description.clone())
                 .show_cancel(true)
-                .ok_text(if delete_files { if cfg!(windows) { "Move to Recycle Bin" } else { "Move to Trash" } } else { "Remove" })
+                .cancel_text("Keep")
+                .ok_text(ok_text)
                 .ok_variant(gpui_kit::component::button::ButtonVariant::Danger)
                 .on_ok(move |_, _, cx| {
-                    store.read(cx).send(Command::Remove { ids: ids.clone(), delete_files });
+                    let store = store.read(cx);
+                    if !unfinished.is_empty() {
+                        store.send(Command::Remove { ids: unfinished.clone(), delete_files: true });
+                    }
+                    if !finished.is_empty() {
+                        store.send(Command::Remove { ids: finished.clone(), delete_files });
+                    }
                     true
                 })
         });
@@ -444,8 +460,13 @@ impl AppView {
                     this.cursor = this.order.first().cloned();
                 }
                 this.detail_open = this.cursor.is_some() && !this.detail_open;
-                this.request_details(cx);
                 cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &OpenDetails, _, cx| {
+                if this.cursor.is_some() {
+                    this.detail_open = true;
+                    cx.notify();
+                }
             }))
             .on_action(cx.listener(|this, _: &CloseOverlay, window, cx| {
                 if !this.selected.is_empty() {
@@ -516,7 +537,13 @@ impl AppView {
     }
 
     fn register_global_actions(&mut self, el: Div, cx: &mut Context<Self>) -> Div {
-        el.on_action(cx.listener(|this, _: &NewDownload, window, cx| this.open_add(None, window, cx)))
+        el.on_action(cx.listener(|this, _: &NewDownload, window, cx| {
+            // Pre-fill with links from the clipboard, if it holds any.
+            let text = cx.read_from_clipboard().and_then(|c| c.text()).unwrap_or_default();
+            let links = crate::clipboard::candidate_links(&text);
+            let req = (!links.is_empty()).then(|| AddRequest { uris: links, ..Default::default() });
+            this.open_add(req, window, cx)
+        }))
             .on_action(cx.listener(|this, _: &OpenCommandPalette, window, cx| crate::ui::palette::open(this, window, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.set_nav(Nav::Settings, window, cx)))
             .on_action(cx.listener(|this, _: &OpenBandwidthSettings, window, cx| {

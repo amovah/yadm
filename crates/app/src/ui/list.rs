@@ -30,6 +30,7 @@ impl AppView {
         let id = ElementId::Name(format!("group-{key:?}").into());
         h_flex()
             .id(id)
+            .w_full()
             .h(dp(ROW_H))
             .px_4()
             .gap_2()
@@ -167,36 +168,57 @@ impl AppView {
                         }
                     } else {
                         this.selected.clear();
-                        if ev.click_count >= 2 {
-                            this.detail_open = true;
-                        }
+                        this.detail_open = true;
                     }
                     this.cursor = Some(id.clone());
-                    if this.detail_open {
-                        this.request_details(cx);
-                    }
                     cx.notify();
                 }),
             )
+            .on_mouse_down(MouseButton::Right, {
+                let id = d.id.clone();
+                cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                    // The context menu acts on the row under the pointer; keep a
+                    // multi-selection only when the row is part of it.
+                    this.focus.focus(window, cx);
+                    if !this.selected.contains(&id) {
+                        this.selected.clear();
+                    }
+                    this.cursor = Some(id.clone());
+                    cx.notify();
+                })
+            })
             .context_menu({
                 let d = d.clone();
                 move |menu, _, _| {
-                    let live = d.state.is_live();
                     let menu = match d.state {
-                        State::Active | State::Queued => menu.menu("Pause", Box::new(PauseResume)),
-                        State::Paused => menu.menu("Resume", Box::new(PauseResume)),
-                        State::Failed => menu.menu("Retry", Box::new(RetrySelected)),
+                        State::Active | State::Queued => menu.menu_with_icon("Pause", Lucide::Pause, Box::new(PauseResume)),
+                        State::Paused => menu.menu_with_icon("Resume", Lucide::Play, Box::new(PauseResume)),
+                        State::Failed => menu.menu_with_icon("Retry", Lucide::RotateCw, Box::new(RetrySelected)),
                         _ => menu,
                     };
-                    menu.when(d.state == State::Completed, |m| m.menu("Open", Box::new(OpenSelected)))
-                        .menu(crate::platform::REVEAL, Box::new(RevealSelected))
-                        .menu("Copy source URL", Box::new(CopySourceUrl))
+                    menu.when(d.state == State::Completed, |m| m.menu_with_icon("Open", Lucide::ExternalLink, Box::new(OpenSelected)))
+                        .menu_with_icon("Open details", Lucide::PanelRight, Box::new(OpenDetails))
+                        .menu_with_icon(crate::platform::REVEAL, Lucide::FolderOpen, Box::new(RevealSelected))
+                        .menu_with_icon("Copy source URL", Lucide::Link, Box::new(CopySourceUrl))
                         .when(d.state == State::Queued, |m| {
-                            m.separator().menu("Move up", Box::new(MoveUp)).menu("Move down", Box::new(MoveDown))
+                            m.separator()
+                                .menu_with_icon("Move up", Lucide::ArrowUp, Box::new(MoveUp))
+                                .menu_with_icon("Move down", Lucide::ArrowDown, Box::new(MoveDown))
                         })
                         .separator()
-                        .menu(if live { "Cancel and remove" } else { "Remove from list" }, Box::new(RemoveSelected))
-                        .menu(format!("Remove and move files to {}", crate::platform::TRASH), Box::new(RemoveSelectedWithFiles))
+                        // Unfinished downloads have one way out: cancel, which also
+                        // clears the partial files. Finished ones keep or drop the file.
+                        .when(d.state != State::Completed, |m| {
+                            m.menu_with_icon("Cancel download", Lucide::CircleX, Box::new(RemoveSelected))
+                        })
+                        .when(d.state == State::Completed, |m| {
+                            m.menu_with_icon("Remove from list", Lucide::ListX, Box::new(RemoveSelected))
+                                .menu_with_icon(
+                                    if d.files.len() > 1 { "Delete files" } else { "Delete file" },
+                                    Lucide::Trash,
+                                    Box::new(RemoveSelectedWithFiles),
+                                )
+                        })
                 }
             })
             .into_any_element()

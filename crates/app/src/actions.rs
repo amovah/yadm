@@ -13,6 +13,7 @@ gpui_kit::actions!(
         OpenCommandPalette,
         OpenSettings,
         ToggleDetails,
+        OpenDetails,
         CloseOverlay,
         SelectNext,
         SelectPrev,

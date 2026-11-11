@@ -7,7 +7,6 @@ use crate::theme::palette;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::DropdownMenu as _;
-use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -81,7 +80,6 @@ impl AppView {
         let Some(d) = self.cursor.as_ref().and_then(|id| store.download(id)).cloned() else {
             return div().into_any_element();
         };
-        let details = store.details(&d.id).cloned();
 
         let primary_action = match d.state {
             State::Active | State::Queued => Some(("Pause", Lucide::Pause)),
@@ -172,8 +170,8 @@ impl AppView {
                         Button::new("detail-remove")
                             .small()
                             .ghost()
-                            .icon(Icon::new(Lucide::Trash))
-                            .tooltip("Remove")
+                            .icon(Icon::new(if d.state == State::Completed { Lucide::ListX } else { Lucide::CircleX }))
+                            .tooltip(if d.state == State::Completed { "Remove from list" } else { "Cancel download" })
                             .on_click(|_, window, cx| window.dispatch_action(Box::new(RemoveSelected), cx)).pressable("detail-remove"),
                     ),
             );
@@ -186,7 +184,16 @@ impl AppView {
             .p_4()
             .child(section_label("Properties", cx))
             .when(d.state == State::Active, |this| {
-                this.child(property("Speed", format!("↓ {}   ↑ {}", format::speed(d.dl_speed), format::speed(d.ul_speed)), cx))
+                this.child(property(
+                    "Speed",
+                    // Only torrents upload; for HTTP/FTP the upload side is always zero.
+                    if matches!(d.kind, DownloadKind::Torrent | DownloadKind::Magnet) {
+                        format!("↓ {}   ↑ {}", format::speed(d.dl_speed), format::speed(d.ul_speed))
+                    } else {
+                        format::speed(d.dl_speed)
+                    },
+                    cx,
+                ))
                     .child(property("Time left", d.eta_secs().map(format::duration).unwrap_or_else(|| "—".into()), cx))
                     .child(property(
                         if matches!(d.kind, DownloadKind::Torrent | DownloadKind::Magnet) { "Peers" } else { "Connections" },
@@ -258,71 +265,9 @@ impl AppView {
                 )
             });
 
-        let is_bt = matches!(d.kind, DownloadKind::Torrent | DownloadKind::Magnet);
-        let tabs: Vec<&str> = if is_bt { vec!["Files", "Peers", "Trackers", "Options"] } else { vec!["Files", "Servers", "Options"] };
-        let tab = self.detail_tab.min(tabs.len() - 1);
-        let tab_name = tabs[tab];
-        let tab_bar = TabBar::new("detail-tabs")
-            .small()
-            .underline()
-            .selected_index(tab)
-            .children(tabs.iter().map(|t| Tab::new().label(t.to_string())))
-            .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                this.detail_tab = *ix;
-                cx.notify();
-            }));
-
-        let empty = |text: &str| div().py_4().text_xs().text_color(theme.muted_foreground).child(text.to_string()).into_any_element();
-        let tab_body: AnyElement = match tab_name {
-            "Files" if d.files.is_empty() => empty("No file information yet"),
-            "Files" => self.render_files(&d, cx),
-            "Peers" => match details.as_ref().map(|x| &x.peers) {
-                Some(peers) if !peers.is_empty() => v_flex()
-                    .children(peers.iter().map(|peer| {
-                        h_flex()
-                            .h(dp(26.))
-                            .gap_2()
-                            .text_xs()
-                            .child(div().flex_1().truncate().child(format!("{}:{}", peer.ip, peer.port)))
-                            .when(peer.seeder, |this| this.child(div().text_color(p.green).child("seed")))
-                            .child(div().w(dp(72.)).text_right().text_color(theme.muted_foreground).child(format!("↓ {}", format::speed(peer.download_speed))))
-                    }))
-                    .into_any_element(),
-                _ => empty("No connected peers"),
-            },
-            "Servers" => match details.as_ref().map(|x| &x.servers) {
-                Some(s) if !s.is_empty() => v_flex()
-                    .children(s.iter().map(|srv| {
-                        h_flex()
-                            .h(dp(26.))
-                            .gap_2()
-                            .text_xs()
-                            .child(div().flex_1().truncate().child(srv.current_uri.clone()))
-                            .child(div().text_color(theme.muted_foreground).child(format::speed(srv.download_speed)))
-                    }))
-                    .into_any_element(),
-                _ => empty("No active connections"),
-            },
-            "Trackers" => match details.as_ref().map(|x| &x.trackers) {
-                Some(t) if !t.is_empty() => v_flex()
-                    .children(t.iter().map(|tr| div().py_0p5().text_xs().truncate().child(tr.clone())))
-                    .into_any_element(),
-                _ => empty("No trackers"),
-            },
-            _ => match details.as_ref().map(|x| &x.options) {
-                Some(o) if !o.is_empty() => v_flex()
-                    .children(o.iter().filter(|(k, _)| !k.contains("secret")).map(|(k, v)| {
-                        h_flex()
-                            .gap_2()
-                            .py_0p5()
-                            .text_xs()
-                            .child(div().w(dp(150.)).flex_shrink_0().truncate().text_color(theme.muted_foreground).child(k.clone()))
-                            .child(div().flex_1().truncate().child(v.clone()))
-                    }))
-                    .into_any_element(),
-                _ => empty("Options are available while the download is in the queue"),
-            },
-        };
+        // Only multi-file torrents need a file list (to pick what to download).
+        let files = (matches!(d.kind, DownloadKind::Torrent | DownloadKind::Magnet) && d.files.len() > 1)
+            .then(|| v_flex().px_4().pb_4().gap_2().child(section_label("Files", cx)).child(self.render_files(&d, cx)));
 
         v_flex()
             .w(dp(400.))
@@ -345,7 +290,7 @@ impl AppView {
                     .overflow_y_scroll()
                     .child(header)
                     .child(props)
-                    .child(v_flex().px_4().pb_4().gap_2().child(tab_bar).child(tab_body)),
+                    .children(files),
             )
             .into_any_element()
     }

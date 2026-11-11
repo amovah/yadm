@@ -67,7 +67,6 @@ pub fn open(view: &mut AppView, window: &mut Window, cx: &mut Context<AppView>) 
                         this.update(cx, |view, cx| {
                             view.cursor = Some(id);
                             view.detail_open = true;
-                            view.request_details(cx);
                             cx.notify();
                         })
                         .ok();

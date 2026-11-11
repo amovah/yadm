@@ -134,12 +134,15 @@ Shortcuts are listed with macOS keys. On Windows and Linux ⌘ is Ctrl and ⌥ i
 ## Browser extension
 
 Load `extension/` unpacked (chrome://extensions → Developer mode → Load unpacked; **Settings → Browser → Show
-folder** opens it). Then paste the pairing token from **Settings → Browser** into the extension's options.
+folder** opens it; in Firefox use `about:debugging` or a signed `.xpi`). The extension pairs itself: on install
+(or its first download) YADM asks **Connect Firefox to YADM?**, and **Allow** hands the extension its token. The
+token is also in **Settings → Browser** if you'd rather paste it into the extension's options.
 Downloads are cancelled in the browser and sent to YADM. If YADM isn't running, the browser keeps the
 download.
 
 The bridge listens on `127.0.0.1` only, requires the token, and accepts browser requests only from extension
-origins.
+origins. Pairing (`POST /v1/pair`) returns the token only after the user allows it in YADM, one request at a
+time.
 
 ## Architecture
 

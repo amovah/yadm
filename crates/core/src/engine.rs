@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use yadm_aria2::{
     Client, DownloadStatus, LIST_KEYS, NotificationKind, Options, Sidecar, SidecarConfig, Status,
 };
-use yadm_bridge::{Bridge, BridgeConfig, BrowserRequest};
+use yadm_bridge::{Bridge, BridgeConfig, BridgeMessage, BrowserRequest};
 
 /// Handle held by the UI. Cloneable; dropping all handles does not stop the
 /// engine — send [`Command::Shutdown`].
@@ -148,8 +148,11 @@ struct Actor {
     visible: bool,
 
     bridge: Option<(Bridge, BridgeSettings)>,
-    bridge_tx: async_channel::Sender<BrowserRequest>,
-    bridge_rx: async_channel::Receiver<BrowserRequest>,
+    bridge_tx: async_channel::Sender<BridgeMessage>,
+    bridge_rx: async_channel::Receiver<BridgeMessage>,
+    /// Extension pairing requests waiting for the user's answer.
+    pending_pairs: HashMap<u64, tokio::sync::oneshot::Sender<bool>>,
+    next_pair: u64,
 }
 
 enum Flow {
@@ -194,6 +197,8 @@ impl Actor {
             bridge: None,
             bridge_tx,
             bridge_rx,
+            pending_pairs: HashMap::new(),
+            next_pair: 0,
         })
     }
 
@@ -304,9 +309,18 @@ impl Actor {
                     }
                 }
                 _ = sched.tick() => self.apply_schedule(false).await,
-                req = self.bridge_rx.recv() => {
-                    if let Ok(req) = req { self.browser_request(req).await; }
-                }
+                msg = self.bridge_rx.recv() => match msg {
+                    Ok(BridgeMessage::Download(req)) => self.browser_request(req).await,
+                    Ok(BridgeMessage::Pair { browser, reply }) => {
+                        self.next_pair += 1;
+                        let id = self.next_pair;
+                        // Drop requests whose extension already gave up waiting.
+                        self.pending_pairs.retain(|_, r| !r.is_closed());
+                        self.pending_pairs.insert(id, reply);
+                        self.emit(Event::PairRequest { id, browser }).await;
+                    }
+                    Err(_) => {}
+                },
                 status = sidecar.wait() => {
                     tracing::error!("aria2 exited: {status:?}");
                     self.engine = EngineStatus::Failed("Engine stopped unexpectedly, restarting…".into());
@@ -798,6 +812,12 @@ impl Actor {
             Command::RequestDetails(id) => self.details(&id).await?,
             Command::UpdateSettings(new) => self.update_settings(*new).await?,
             Command::SetVisible(v) => self.visible = v,
+            Command::AnswerPair { id, allow } => {
+                // The first answer wins; closing the dialog afterwards is a no-op.
+                if let Some(reply) = self.pending_pairs.remove(&id) {
+                    let _ = reply.send(allow);
+                }
+            }
             Command::Shutdown => {}
         }
         Ok(())

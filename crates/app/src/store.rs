@@ -9,6 +9,8 @@ pub enum StoreEvent {
     Completed { id: String, name: String },
     Failed { name: String, error: String },
     BrowserRequest(AddRequest),
+    /// A browser extension asks to pair (see [`yadm_core::Command::AnswerPair`]).
+    PairRequest { id: u64, browser: String },
 }
 
 pub struct AppStore {
@@ -72,6 +74,7 @@ impl AppStore {
             Event::Failed { name, error, .. } => cx.emit(StoreEvent::Failed { name, error }),
             Event::Toast { kind, message } => cx.emit(StoreEvent::Toast(kind, message)),
             Event::BrowserRequest(req) => cx.emit(StoreEvent::BrowserRequest(req)),
+            Event::PairRequest { id, browser } => cx.emit(StoreEvent::PairRequest { id, browser }),
             Event::SettingsChanged(s) => {
                 self.settings = *s;
                 cx.notify();

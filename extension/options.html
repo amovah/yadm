@@ -14,13 +14,23 @@
   button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: inherit; cursor: pointer; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   #status { margin-left: auto; color: var(--muted); font-size: 12px; }
+  #pairState { color: var(--muted); }
+  details { margin-top: 10px; color: var(--muted); font-size: 12px; }
+  summary { cursor: pointer; }
 </style>
 </head>
 <body>
   <h1>YADM</h1>
   <div class="row"><input type="checkbox" id="enabled"><span>Send downloads to YADM</span></div>
-  <label for="token">Pairing token (YADM → Settings → Browser)</label>
-  <input type="password" id="token" autocomplete="off">
+  <div class="row">
+    <span id="pairState">Checking…</span>
+    <button id="connect" class="primary" hidden>Connect to YADM</button>
+  </div>
+  <details>
+    <summary>Enter token manually</summary>
+    <label for="token">Pairing token (YADM → Settings → Browser)</label>
+    <input type="password" id="token" autocomplete="off">
+  </details>
   <label for="port">Port</label>
   <input type="number" id="port" min="1024" max="65535">
   <label for="minSizeMB">Ignore files smaller than (MB, 0 = none)</label>

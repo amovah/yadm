@@ -609,7 +609,7 @@ impl SettingsView {
                     Self::row("Port", None, "bridge extension network", narrow(&self.port), cx),
                     Self::row(
                         "Pairing token",
-                        Some("Paste this into the extension's options"),
+                        Some("Extensions connect on their own once you allow them. A new token disconnects them all"),
                         "extension secret key",
                         h_flex()
                             .gap_1()

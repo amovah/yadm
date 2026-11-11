@@ -274,6 +274,11 @@ pub enum Command {
     UpdateSettings(Box<Settings>),
     /// Window visibility; lowers the polling rate when hidden.
     SetVisible(bool),
+    /// The user's answer to [`Event::PairRequest`].
+    AnswerPair {
+        id: u64,
+        allow: bool,
+    },
     Shutdown,
 }
 
@@ -312,5 +317,10 @@ pub enum Event {
     },
     /// A browser extension asked to download something and the user wants to confirm it.
     BrowserRequest(AddRequest),
+    /// A browser extension wants to pair; answer with [`Command::AnswerPair`].
+    PairRequest {
+        id: u64,
+        browser: String,
+    },
     SettingsChanged(Box<Settings>),
 }

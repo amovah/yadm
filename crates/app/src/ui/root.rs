@@ -234,6 +234,12 @@ impl AppView {
                 self.open_add(Some(req.clone()), window, cx);
                 return;
             }
+            StoreEvent::PairRequest { id, browser } => {
+                cx.activate(true);
+                window.activate_window();
+                self.confirm_pair(*id, browser.clone(), window, cx);
+                return;
+            }
         };
         window.push_notification(note, cx);
     }
@@ -364,6 +370,30 @@ impl AppView {
         }
         self.cursor = Some(id);
         cx.notify();
+    }
+
+    /// Asks whether a browser extension may connect. Allowing hands it the
+    /// pairing token; closing the dialog any other way refuses.
+    fn confirm_pair(&mut self, id: u64, browser: String, window: &mut Window, cx: &mut Context<Self>) {
+        let store = self.store.clone();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (allow, deny) = (store.clone(), store.clone());
+            alert
+                .entrance(gpui_kit::component::dialog::DialogEntrance::None)
+                .title(format!("Connect {browser} to YADM?"))
+                .description(
+                    "The YADM extension wants to send downloads here. Allow it only if you just installed or set up the extension.",
+                )
+                .show_cancel(true)
+                .cancel_text("Deny")
+                .ok_text("Allow")
+                .on_ok(move |_, _, cx| {
+                    allow.read(cx).send(Command::AnswerPair { id, allow: true });
+                    true
+                })
+                // Runs after Allow too; the engine ignores the second answer.
+                .on_close(move |_, _, cx| deny.read(cx).send(Command::AnswerPair { id, allow: false }))
+        });
     }
 
     /// Removes downloads. Unfinished ones always lose their partial files (there

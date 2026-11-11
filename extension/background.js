@@ -14,14 +14,58 @@ async function cookiesFor(url) {
   }
 }
 
-async function send(payload) {
-  const cfg = await config();
-  if (!cfg.token) throw new Error("Pair the extension with YADM first (Options).");
-  const res = await fetch(`http://127.0.0.1:${cfg.port}/v1/downloads`, {
+function browserName() {
+  const ua = navigator.userAgent;
+  if (ua.includes("Firefox/")) return "Firefox";
+  if (ua.includes("Edg/")) return "Edge";
+  if (ua.includes("OPR/")) return "Opera";
+  if (ua.includes("Brave")) return "Brave";
+  return "Chrome";
+}
+
+// Asks YADM for the token; YADM shows an Allow/Deny dialog. One request at a time.
+// After a Deny, only the options page's Connect button (`manual`) asks again.
+let pairing = null;
+function pair(manual = false) {
+  pairing ??= (async () => {
+    try {
+      const cfg = await config();
+      const { pairDenied } = await chrome.storage.local.get({ pairDenied: false });
+      if (pairDenied && !manual) throw new Error("Not connected: press Connect in the extension's options.");
+      const res = await fetch(`http://127.0.0.1:${cfg.port}/v1/pair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ browser: browserName() }),
+      });
+      if (res.status === 403) {
+        await chrome.storage.local.set({ pairDenied: true });
+        throw new Error("Connection was denied in YADM.");
+      }
+      if (!res.ok) throw new Error(`YADM answered ${res.status}`);
+      const { token } = await res.json();
+      await chrome.storage.sync.set({ token });
+      await chrome.storage.local.set({ pairDenied: false });
+      return token;
+    } finally {
+      pairing = null;
+    }
+  })();
+  return pairing;
+}
+
+async function post(cfg, token, payload) {
+  return fetch(`http://127.0.0.1:${cfg.port}/v1/downloads`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
   });
+}
+
+async function send(payload) {
+  const cfg = await config();
+  // Not paired yet, or YADM's token changed: pair (the user confirms in YADM) and retry.
+  let res = cfg.token ? await post(cfg, cfg.token, payload) : null;
+  if (!res || res.status === 401) res = await post(cfg, await pair(), payload);
   if (res.status !== 202) throw new Error(`YADM answered ${res.status}`);
 }
 
@@ -44,7 +88,7 @@ function shouldSkip(item, cfg) {
 
 chrome.downloads.onCreated.addListener(async (item) => {
   const cfg = await config();
-  if (!cfg.enabled || !cfg.token || shouldSkip(item, cfg)) return;
+  if (!cfg.enabled || shouldSkip(item, cfg)) return;
   const url = item.finalUrl || item.url;
   try {
     const payload = await buildPayload(url, {
@@ -63,8 +107,17 @@ chrome.downloads.onCreated.addListener(async (item) => {
   }
 });
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.create({ id: "yadm-link", title: "Download with YADM", contexts: ["link", "video", "audio", "image"] });
+  // Connect right away if YADM is running; otherwise the first download does it.
+  if (!(await config()).token) pair().catch(() => {});
+});
+
+// The options page's "Connect" button.
+chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+  if (msg?.type !== "pair") return;
+  pair(true).then(() => respond({ ok: true }), (e) => respond({ ok: false, error: String(e.message || e) }));
+  return true;
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {

@@ -10,14 +10,19 @@ mod store;
 mod theme;
 #[cfg(any(target_os = "macos", windows))]
 mod tray;
-/// No tray on Linux (see [`platform::HAS_TRAY`]): closing the window quits.
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(target_os = "linux")]
+#[path = "tray_linux.rs"]
+mod tray;
+/// No tray elsewhere (see [`platform::HAS_TRAY`]): closing the window quits.
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 mod tray {
     pub fn start(_: &mut gpui_kit::App) {}
     pub fn is_active() -> bool {
         false
     }
 }
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+mod tray_glyph;
 mod ui;
 
 use actions::*;
@@ -35,6 +40,8 @@ pub fn open_main_window(cx: &mut App) {
         window_min_size: Some(size(dp(880.), dp(520.))),
         titlebar: Some(TitlebarOptions {
             traffic_light_position: Some(point(px(16.), px(14.))),
+            // The window manager shows this, e.g. in GNOME's "“YADM” is ready".
+            title: Some("YADM".into()),
             ..TitleBar::title_bar_options()
         }),
         app_id: Some("dev.yadm.app".into()),
@@ -139,11 +146,14 @@ fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
 
+    #[cfg(target_os = "linux")]
+    platform::register_desktop_entry();
+
     let paths = Paths::system();
     let settings = Settings::load(&paths.settings());
     let engine = Engine::start(paths, settings.clone());
 
-    // The tray keeps YADM alive with no window open (macOS and Windows).
+    // The tray keeps YADM alive with no window open.
     let app = gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).with_quit_mode(QuitMode::Explicit);
     app.on_reopen(|cx| {
         if cx.windows().is_empty() {

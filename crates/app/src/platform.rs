@@ -5,9 +5,10 @@ use std::path::PathBuf;
 
 pub const IS_MAC: bool = cfg!(target_os = "macos");
 
-/// Whether YADM has a menu bar / system tray icon. On Linux the tray library
-/// needs a GTK event loop that gpui doesn't run, so there is none there.
-pub const HAS_TRAY: bool = cfg!(any(target_os = "macos", windows));
+/// Whether YADM has a menu bar / system tray icon. On Linux it needs a
+/// StatusNotifierItem host (GNOME: the AppIndicator extension); without one,
+/// [`crate::tray`] reports inactive and closing the window quits as usual.
+pub const HAS_TRAY: bool = cfg!(any(target_os = "macos", windows, target_os = "linux"));
 
 /// Rewrites a `cmd-` keystroke for the host OS (`ctrl-` off macOS).
 ///
@@ -89,6 +90,44 @@ pub fn system_notifications() -> bool {
         std::env::current_exe().is_ok_and(|p| p.to_string_lossy().contains(".app/Contents/MacOS"))
     } else {
         true
+    }
+}
+
+/// Registers YADM with the Linux desktop (a `.desktop` entry and an icon under
+/// `~/.local/share`), so notifications, the dock and the app grid show "YADM"
+/// with its icon instead of the bare app id. The entry follows the binary if it
+/// moves; nothing is rewritten while it already points here.
+#[cfg(target_os = "linux")]
+pub fn register_desktop_entry() {
+    const APP_ID: &str = "dev.yadm.app";
+    const ICON: &[u8] = include_bytes!("../../../assets/icon.png");
+    let Some(data) = std::env::var_os("XDG_DATA_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+    else {
+        return;
+    };
+    let Ok(exe) = std::env::current_exe() else { return };
+    let icon = data.join("icons/hicolor/1024x1024/apps").join(format!("{APP_ID}.png"));
+    let entry = data.join("applications").join(format!("{APP_ID}.desktop"));
+    let exec = exe.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let desktop = format!(
+        "[Desktop Entry]\nType=Application\nName=YADM\nGenericName=Download Manager\nComment=Fast downloads with aria2, pause, resume and browser integration\n\
+         Exec=\"{exec}\"\nIcon={}\nTerminal=false\nCategories=Network;FileTransfer;\nStartupWMClass={APP_ID}\n",
+        icon.display()
+    );
+    let write = |path: &std::path::Path, bytes: &[u8]| -> std::io::Result<()> {
+        if std::fs::read(path).is_ok_and(|old| old == bytes) {
+            return Ok(());
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(path, bytes)
+    };
+    if let Err(e) = write(&icon, ICON).and_then(|_| write(&entry, desktop.as_bytes())) {
+        tracing::warn!("could not register desktop entry: {e}");
     }
 }
 

@@ -558,10 +558,25 @@ impl Actor {
             state = State::Queued;
         }
         let metadata = st.is_metadata_only();
-        if !metadata && let Some(name) = st.name() {
-            d.name = name;
-        }
+        // A download restored from aria2's session but not started yet hasn't
+        // talked to the server: aria2 reports no path, size or progress until it
+        // is resumed. Keep what we stored instead of blanking it out.
+        let unresolved = st.bittorrent.is_none()
+            && st.total_length == 0
+            && st.files.first().is_none_or(|f| f.path.is_empty());
         if !metadata {
+            if !unresolved {
+                if let Some(name) = st.name() {
+                    d.name = name;
+                }
+            } else if d.name.is_empty() || d.name.contains("://") {
+                // No path yet: name it after the URL's file, never the raw URL.
+                if let Some(uri) = d.uris.first().cloned().or_else(|| st.name()) {
+                    d.name = name_from_uri(&uri);
+                }
+            }
+        }
+        if !metadata && !(unresolved && d.total > 0) {
             d.total = st.total_length;
             d.completed = st.completed_length;
             d.files = st
@@ -1188,6 +1203,19 @@ fn removable_paths(d: &Download) -> Vec<PathBuf> {
         out.push(PathBuf::from(format!("{}.aria2", p.display())));
         out.push(p);
     }
+    // No file list yet (never started, or restored before aria2 resolved it):
+    // the partial file sits at <dir>/<name>, next to its .aria2 control file.
+    if out.is_empty()
+        && !d.dir.is_empty()
+        && !d.name.is_empty()
+        && !d.name.contains(['/', '\\'])
+        && d.name != ".."
+        && d.name != "."
+    {
+        let p = dir.join(&d.name);
+        out.push(PathBuf::from(format!("{}.aria2", p.display())));
+        out.push(p);
+    }
     out
 }
 
@@ -1259,5 +1287,13 @@ mod tests {
             removable_paths(&d),
             vec![PathBuf::from("/dl/a.zip.aria2"), PathBuf::from("/dl/a.zip")]
         );
+        // No file list yet: fall back to <dir>/<name>, but never outside dir.
+        let d = Download { dir: "/dl".into(), name: "movie.mkv".into(), ..Default::default() };
+        assert_eq!(
+            removable_paths(&d),
+            vec![PathBuf::from("/dl/movie.mkv.aria2"), PathBuf::from("/dl/movie.mkv")]
+        );
+        let d = Download { dir: "/dl".into(), name: "../etc".into(), ..Default::default() };
+        assert!(removable_paths(&d).is_empty());
     }
 }

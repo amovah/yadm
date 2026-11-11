@@ -90,6 +90,7 @@ impl AppView {
 
         h_flex()
             .id(ElementId::Name(format!("row-{}", d.id).into()))
+            .w_full()
             .h(dp(ROW_H))
             .pl_4()
             .pr_4()

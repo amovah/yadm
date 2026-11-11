@@ -5,7 +5,7 @@
   "description": "Send downloads to the YADM download manager.",
   "permissions": ["downloads", "contextMenus", "cookies", "storage", "notifications"],
   "host_permissions": ["<all_urls>", "http://127.0.0.1/*"],
-  "background": { "service_worker": "background.js" },
+  "background": { "service_worker": "background.js", "scripts": ["background.js"] },
   "options_page": "options.html",
   "action": { "default_title": "YADM", "default_popup": "options.html" },
   "icons": { "128": "icon.png" },

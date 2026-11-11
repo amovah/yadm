@@ -10,6 +10,7 @@ use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use super::kit::PressableExt as _;
 use yadm_core::format;
 
 const LIMIT_PRESETS: [(&str, u64); 6] = [
@@ -41,7 +42,7 @@ impl AppView {
                     menu = menu.menu_with_check(label, limit == bytes, Box::new(SetDownloadLimit { bytes }));
                 }
                 menu.separator().menu("Bandwidth settings…", Box::new(OpenBandwidthSettings))
-            });
+            }).pressable("speed-limit");
 
         let stat = |icon: Lucide, color: Hsla, text: String| {
             h_flex().gap_1p5().child(Icon::new(icon).small().text_color(color)).child(text)

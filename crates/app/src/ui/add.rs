@@ -10,6 +10,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use super::kit::PressableExt as _;
 use std::cell::Cell;
 use std::path::PathBuf;
 use yadm_core::{AddRequest, Category, Command, format};
@@ -239,7 +240,7 @@ impl Render for AddDownload {
                             Button::new("clear-torrent").ghost().xsmall().icon(Icon::new(Lucide::X)).on_click(cx.listener(|this, _, _, cx| {
                                 this.torrent = None;
                                 cx.notify();
-                            })),
+                            })).pressable("clear-torrent"),
                         )
                     })
                     .child(div().flex_1())
@@ -249,7 +250,7 @@ impl Render for AddDownload {
                             .small()
                             .icon(Icon::new(Lucide::FileUp))
                             .label("Torrent or Metalink…")
-                            .on_click(cx.listener(|this, _, window, cx| this.pick_torrent(window, cx))),
+                            .on_click(cx.listener(|this, _, window, cx| this.pick_torrent(window, cx))).pressable("pick-torrent"),
                     ),
             )
             .child(div().h_px().bg(theme.border))
@@ -275,7 +276,7 @@ impl Render for AddDownload {
                                     .gap_2()
                                     .child(Icon::new(Lucide::Folder).small().text_color(theme.muted_foreground))
                                     .child(div().flex_1().truncate().text_sm().child(dir_label))
-                                    .child(Button::new("pick-dir").small().label("Change…").on_click(cx.listener(|this, _, window, cx| this.pick_dir(window, cx)))),
+                                    .child(Button::new("pick-dir").small().label("Change…").on_click(cx.listener(|this, _, window, cx| this.pick_dir(window, cx))).pressable("pick-dir")),
                             ),
                     )
                     .child(
@@ -294,7 +295,7 @@ impl Render for AddDownload {
                                             menu = menu.menu_with_check(c.label(), current_category == Some(c), Box::new(PickCategory { category: Some(c.as_str().into()) }));
                                         }
                                         menu
-                                    }),
+                                    }).pressable("pick-category"),
                             )
                             .when(settings.category_folders && self.dir.is_none(), |this| {
                                 this.child(muted_text("Sorted into a category folder", cx))
@@ -325,13 +326,13 @@ impl Render for AddDownload {
                             })),
                     )
                     .child(div().flex_1())
-                    .child(Button::new("cancel").small().ghost().label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
+                    .child(Button::new("cancel").small().ghost().label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)).pressable("cancel"))
                     .child(
                         Button::new("submit")
                             .small()
                             .primary()
                             .child(h_flex().gap_1p5().child("Add download").child(kbd_on("⌘↵", theme.primary_foreground)))
-                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))).pressable("submit"),
                     ),
             )
     }

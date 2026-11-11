@@ -11,6 +11,7 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use super::kit::PressableExt as _;
 use yadm_core::{Category, Command, Download, DownloadKind, State, format};
 
 gpui_kit::actions!(yadm_detail, [LimitNone, Limit256K, Limit1M, Limit5M]);
@@ -108,7 +109,7 @@ impl AppView {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.detail_open = false;
                                 cx.notify();
-                            })),
+                            })).pressable("detail-close"),
                     ),
             )
             .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).line_height(rems(1.4)).child(d.name.clone()))
@@ -137,7 +138,7 @@ impl AppView {
                                 .small()
                                 .icon(Icon::new(icon))
                                 .label(label)
-                                .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx)),
+                                .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx)).pressable("detail-primary"),
                         )
                     })
                     .when(d.state == State::Completed, |this| {
@@ -146,7 +147,7 @@ impl AppView {
                                 .small()
                                 .icon(Icon::new(Lucide::ExternalLink))
                                 .label("Open")
-                                .on_click(|_, window, cx| window.dispatch_action(Box::new(OpenSelected), cx)),
+                                .on_click(|_, window, cx| window.dispatch_action(Box::new(OpenSelected), cx)).pressable("detail-open"),
                         )
                     })
                     .child(
@@ -155,7 +156,7 @@ impl AppView {
                             .ghost()
                             .icon(Icon::new(Lucide::FolderOpen))
                             .tooltip("Show in Finder  ⌘O")
-                            .on_click(|_, window, cx| window.dispatch_action(Box::new(RevealSelected), cx)),
+                            .on_click(|_, window, cx| window.dispatch_action(Box::new(RevealSelected), cx)).pressable("detail-reveal"),
                     )
                     .child(
                         Button::new("detail-copy")
@@ -163,7 +164,7 @@ impl AppView {
                             .ghost()
                             .icon(Icon::new(Lucide::Link))
                             .tooltip("Copy source URL")
-                            .on_click(|_, window, cx| window.dispatch_action(Box::new(CopySourceUrl), cx)),
+                            .on_click(|_, window, cx| window.dispatch_action(Box::new(CopySourceUrl), cx)).pressable("detail-copy"),
                     )
                     .child(div().flex_1())
                     .child(
@@ -172,7 +173,7 @@ impl AppView {
                             .ghost()
                             .icon(Icon::new(Lucide::Trash))
                             .tooltip("Remove")
-                            .on_click(|_, window, cx| window.dispatch_action(Box::new(RemoveSelected), cx)),
+                            .on_click(|_, window, cx| window.dispatch_action(Box::new(RemoveSelected), cx)).pressable("detail-remove"),
                     ),
             );
 
@@ -210,7 +211,7 @@ impl AppView {
                             menu = menu.menu_with_check(c.label(), c == category, Box::new(SetCategoryAction { id: cat_id.clone(), category: c.as_str().into() }));
                         }
                         menu
-                    }),
+                    }).pressable("detail-category"),
                 cx,
             ))
             .when(d.state.is_live(), |this| {
@@ -221,7 +222,7 @@ impl AppView {
                             .menu("256 KB/s", Box::new(Limit256K))
                             .menu("1 MB/s", Box::new(Limit1M))
                             .menu("5 MB/s", Box::new(Limit5M))
-                    }),
+                    }).pressable("detail-limit"),
                     cx,
                 ))
             })

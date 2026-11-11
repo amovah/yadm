@@ -155,3 +155,53 @@ pub fn window_drag_area(id: &'static str) -> Stateful<Div> {
             }
         })
 }
+
+/// Snappy, slightly underdamped spring for press feedback.
+const PRESS_SPRING: SpringConfig = SpringConfig::new(700., 34., 1.);
+/// How far a pressed control dims.
+const PRESS_OPACITY: f32 = 0.6;
+
+/// Wraps a clickable element so it dims while held and springs back on
+/// release, giving every button a small tactile response.
+#[derive(IntoElement)]
+pub struct Pressable {
+    id: ElementId,
+    child: AnyElement,
+}
+
+pub trait PressableExt: IntoElement + Sized {
+    /// `id` must be unique among siblings (reusing the element's own id is fine).
+    fn pressable(self, id: impl Into<ElementId>) -> Pressable {
+        Pressable { id: id.into(), child: self.into_any_element() }
+    }
+}
+
+impl<E: IntoElement> PressableExt for E {}
+
+impl RenderOnce for Pressable {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let pressed = window.use_keyed_state(self.id.clone(), cx, |_, _| false);
+        let is_pressed = *pressed.read(cx);
+        let setter = |value: bool| {
+            let pressed = pressed.clone();
+            move |cx: &mut App| {
+                pressed.update(cx, |p, cx| {
+                    if *p != value {
+                        *p = value;
+                        cx.notify();
+                    }
+                })
+            }
+        };
+        let (press, release, release_out) = (setter(true), setter(false), setter(false));
+        div()
+            .id(self.id.clone())
+            .on_mouse_down(MouseButton::Left, move |_, _, cx| press(cx))
+            .on_mouse_up(MouseButton::Left, move |_, _, cx| release(cx))
+            .on_mouse_up_out(MouseButton::Left, move |_, _, cx| release_out(cx))
+            .child(self.child)
+            .with_spring(self.id, SpringAnimation::new(PRESS_SPRING).to(is_pressed), |el, phase| {
+                el.opacity(phase.interpolate(1., PRESS_OPACITY).clamp(PRESS_OPACITY, 1.))
+            })
+    }
+}

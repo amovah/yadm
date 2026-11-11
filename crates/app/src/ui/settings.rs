@@ -13,6 +13,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Icon, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use super::kit::PressableExt as _;
 use yadm_core::schedule::{ScheduleAction, ScheduleRule};
 use yadm_core::settings::new_token;
 use yadm_core::{Settings, ThemePref, format};
@@ -444,7 +445,7 @@ impl SettingsView {
                                 menu.menu_with_check("Limit speed", matches!(action, ScheduleAction::Limit { .. }), mk("limit"))
                                     .menu_with_check("Pause all", action == ScheduleAction::Pause, mk("pause"))
                                     .menu_with_check("Download only in this window", action == ScheduleAction::DownloadOnly, mk("window"))
-                            }),
+                            }).pressable(ElementId::Name(format!("rule-kind-{id}").into())),
                     )
                     .child(Button::new(ElementId::Name(format!("rule-del-{id}").into())).ghost().small().icon(Icon::new(Lucide::Trash)).on_click(
                         cx.listener({
@@ -454,7 +455,7 @@ impl SettingsView {
                                 this.sync_rules(window, cx);
                             }
                         }),
-                    )),
+                    ).pressable(ElementId::Name(format!("rule-del-{id}").into()))),
             )
             .child(
                 h_flex()
@@ -501,7 +502,7 @@ impl SettingsView {
                         "Download folder",
                         Some(&dir),
                         "location path directory save",
-                        Button::new("pick-download-dir").small().label("Change…").on_click(cx.listener(|this, _, window, cx| this.pick_dir(window, cx))),
+                        Button::new("pick-download-dir").small().label("Change…").on_click(cx.listener(|this, _, window, cx| this.pick_dir(window, cx))).pressable("pick-download-dir"),
                         cx,
                     ),
                     Self::row("Save in category folders", Some("Video, Music, Documents… inside the download folder"), "organize sort store", self.switch("category-folders", s.category_folders, cx, |s, v| s.category_folders = v), cx),
@@ -558,7 +559,7 @@ impl SettingsView {
                         .child(Button::new("add-rule").ghost().small().icon(Icon::new(Lucide::Plus)).label("Add rule").on_click(cx.listener(|this, _, window, cx| {
                             this.edit(window, cx, |s| s.schedule.push(ScheduleRule::new("Work hours", ScheduleAction::Limit { down: 512 * 1024, up: 0 })));
                             this.sync_rules(window, cx);
-                        })))
+                        })).pressable("add-rule"))
                         .into_any_element(),
                 });
                 rows
@@ -580,17 +581,17 @@ impl SettingsView {
                             .child(Button::new("copy-token").ghost().small().icon(Icon::new(Lucide::Copy)).tooltip("Copy").on_click(move |_, window, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(token.clone()));
                                 window.push_notification(Notification::info("Token copied"), cx);
-                            }))
+                            }).pressable("copy-token"))
                             .child(Button::new("regen-token").ghost().small().icon(Icon::new(Lucide::RefreshCw)).tooltip("Generate a new token").on_click(
                                 cx.listener(|this, _, window, cx| this.edit(window, cx, |s| s.bridge.token = new_token())),
-                            )),
+                            ).pressable("regen-token")),
                         cx,
                     ),
                     Self::row(
                         "Install the extension",
                         Some("Chrome: chrome://extensions → Developer mode → Load unpacked"),
                         "chrome setup",
-                        Button::new("reveal-ext").small().label("Show folder").on_click(move |_, _, cx| cx.reveal_path(&ext_dir)),
+                        Button::new("reveal-ext").small().label("Show folder").on_click(move |_, _, cx| cx.reveal_path(&ext_dir)).pressable("reveal-ext"),
                         cx,
                     ),
                 ]
@@ -623,8 +624,8 @@ impl SettingsView {
                         "log data folder debug",
                         h_flex()
                             .gap_1()
-                            .child(Button::new("open-log").small().label("Engine log").on_click(move |_, _, cx| cx.open_with_system(&log)))
-                            .child(Button::new("open-data").small().label("Data folder").on_click(move |_, _, cx| cx.reveal_path(&data_dir))),
+                            .child(Button::new("open-log").small().label("Engine log").on_click(move |_, _, cx| cx.open_with_system(&log)).pressable("open-log"))
+                            .child(Button::new("open-data").small().label("Data folder").on_click(move |_, _, cx| cx.reveal_path(&data_dir)).pressable("open-data")),
                         cx,
                     ),
                 ]
@@ -667,7 +668,8 @@ impl SettingsView {
             .hover(|this| this.bg(theme.sidebar_accent).text_color(theme.foreground))
             .child(Icon::new(Lucide::ChevronLeft).small())
             .child("Back to app")
-            .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Close)));
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Close)))
+            .pressable("settings-back");
 
         let search = div().px_2().pt_2().child(
             Input::new(&self.search)
@@ -707,7 +709,8 @@ impl SettingsView {
                         .child(Icon::new(section.icon()).small().text_color(theme.muted_foreground))
                         .child(div().flex_1().truncate().child(section.label()))
                         .when(searching && hits > 0, |this| this.child(div().text_xs().text_color(theme.muted_foreground).child(hits.to_string())))
-                        .on_click(cx.listener(move |this, _, window, cx| this.select(section, window, cx))),
+                        .on_click(cx.listener(move |this, _, window, cx| this.select(section, window, cx)))
+                        .pressable(ElementId::Name(format!("settings-nav-{}", section.label()).into())),
                 );
             }
         }

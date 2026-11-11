@@ -10,6 +10,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use super::kit::PressableExt as _;
 use yadm_core::{Category, EngineStatus, State};
 
 impl AppView {
@@ -25,8 +26,9 @@ impl AppView {
     ) -> AnyElement {
         let active = self.nav == nav;
         let theme = cx.theme();
+        let id = id.into();
         h_flex()
-            .id(id)
+            .id(id.clone())
             .h(px(30.))
             .px_2()
             .gap_2()
@@ -45,6 +47,7 @@ impl AppView {
                 this.child(div().text_xs().text_color(theme.muted_foreground).child(c.to_string()))
             })
             .on_click(cx.listener(move |this, _, window, cx| this.set_nav(nav, window, cx)))
+            .pressable(id)
             .into_any_element()
     }
 
@@ -74,7 +77,7 @@ impl AppView {
                     .separator()
                     .menu("Hide YADM", Box::new(HideWindow))
                     .menu("Quit YADM", Box::new(Quit))
-            });
+            }).pressable("app-menu");
         let top_row = h_flex()
             .px_2()
             .h(px(34.))
@@ -87,7 +90,7 @@ impl AppView {
                     .small()
                     .icon(Icon::new(Lucide::Search))
                     .tooltip("Search  ⌘K")
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(OpenCommandPalette), cx)),
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(OpenCommandPalette), cx)).pressable("sidebar-search"),
             )
             .child(
                 Button::new("sidebar-new")
@@ -95,7 +98,7 @@ impl AppView {
                     .small()
                     .icon(Icon::new(Lucide::Plus))
                     .tooltip("New download  ⌘N")
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(NewDownload), cx)),
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(NewDownload), cx)).pressable("sidebar-new"),
             );
 
 
@@ -159,6 +162,7 @@ impl AppView {
                     this.show_empty_categories = !this.show_empty_categories;
                     cx.notify();
                 }))
+                .pressable("nav-cat-toggle")
         });
         let categories = v_flex().px_2().gap_px().children(cat_items).children(toggle);
 

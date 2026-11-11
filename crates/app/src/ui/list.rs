@@ -11,6 +11,7 @@ use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _};
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use super::kit::PressableExt as _;
 use std::ops::Range;
 use yadm_core::{Command, Download, State, format};
 
@@ -247,7 +248,7 @@ impl AppView {
                         menu.menu_with_check("Status", group_by == GroupBy::Status, Box::new(GroupByStatus))
                             .menu_with_check("Category", group_by == GroupBy::Category, Box::new(GroupByCategory))
                             .menu_with_check("No grouping", group_by == GroupBy::None, Box::new(GroupByNone))
-                    }),
+                    }).pressable("group-by"),
             )
             .child(
                 Button::new("pause-all")
@@ -255,7 +256,7 @@ impl AppView {
                     .small()
                     .icon(Icon::new(Lucide::Pause))
                     .tooltip("Pause all  ⌥⌘P")
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(PauseAll), cx)),
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(PauseAll), cx)).pressable("pause-all"),
             )
             .child(
                 Button::new("resume-all")
@@ -263,7 +264,7 @@ impl AppView {
                     .small()
                     .icon(Icon::new(Lucide::Play))
                     .tooltip("Resume all  ⌥⌘R")
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(ResumeAll), cx)),
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(ResumeAll), cx)).pressable("resume-all"),
             )
             .child(
                 Button::new("clear-finished")
@@ -271,7 +272,7 @@ impl AppView {
                     .small()
                     .icon(Icon::new(Lucide::ListX))
                     .tooltip("Clear completed")
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(ClearFinished), cx)),
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(ClearFinished), cx)).pressable("clear-finished"),
             )
             .child(
                 Button::new("add")
@@ -279,7 +280,7 @@ impl AppView {
                     .small()
                     .icon(Icon::new(Lucide::Plus))
                     .label("Add")
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(NewDownload), cx)),
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(NewDownload), cx)).pressable("add"),
             )
             .into_any_element()
     }
@@ -319,7 +320,7 @@ impl AppView {
                         .primary()
                         .small()
                         .child(h_flex().gap_1p5().child("New download").child(kbd_on("⌘N", theme.primary_foreground)))
-                        .on_click(|_, window, cx| window.dispatch_action(Box::new(NewDownload), cx)),
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(NewDownload), cx)).pressable("empty-add"),
                 )
             })
             .into_any_element()
@@ -346,20 +347,20 @@ impl AppView {
                     .child(div().pr_2().text_sm().child(format!("{} selected", ids.len())))
                     .child(Button::new("bulk-pause").ghost().small().icon(Icon::new(Lucide::Pause)).label("Pause").on_click(cx.listener(
                         move |this, _, _, cx| this.store.read(cx).send(Command::Pause(pause_ids.clone())),
-                    )))
+                    )).pressable("bulk-pause"))
                     .child(Button::new("bulk-resume").ghost().small().icon(Icon::new(Lucide::Play)).label("Resume").on_click(cx.listener(
                         move |this, _, _, cx| this.store.read(cx).send(Command::Resume(resume_ids.clone())),
-                    )))
+                    )).pressable("bulk-resume"))
                     .child(Button::new("bulk-remove").ghost().small().icon(Icon::new(Lucide::Trash)).label("Remove").on_click(cx.listener(
                         move |this, _, window, cx| this.confirm_remove(ids.clone(), false, window, cx),
-                    )))
+                    )).pressable("bulk-remove"))
                     .child(div().w_px().h(px(16.)).bg(theme.border))
                     .child(Button::new("bulk-clear").ghost().small().icon(Icon::new(Lucide::X)).tooltip("Clear selection  Esc").on_click(cx.listener(
                         |this, _, _, cx| {
                             this.selected.clear();
                             cx.notify();
                         },
-                    ))),
+                    )).pressable("bulk-clear")),
             )
             .into_any_element(),
         )

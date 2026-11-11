@@ -76,7 +76,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             download_dir: dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")),
-            category_folders: false,
+            category_folders: true,
             max_concurrent: 1,
             split: 8,
             max_connections_per_server: 8,

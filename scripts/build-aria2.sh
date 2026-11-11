@@ -30,13 +30,14 @@ for a in $ARCHS; do ARCH_FLAGS="$ARCH_FLAGS -arch $a"; done
   --without-gnutls --without-openssl --without-libgcrypt --without-libnettle \
   --without-libxml2 --without-libexpat \
   --without-libcares --without-libssh2 --without-sqlite3 \
-  --without-libuv \
+  --without-libuv --without-libgmp \
+  --disable-nls \
   --enable-bittorrent \
   ARIA2_STATIC=no \
   CXXFLAGS="-O2 $ARCH_FLAGS" CFLAGS="-O2 $ARCH_FLAGS" LDFLAGS="$ARCH_FLAGS" \
-  > configure.log
+  > configure.log || { tail -50 configure.log >&2; exit 1; }
 
-make -j"$JOBS" > make.log
+make -j"$JOBS" > make.log 2>&1 || { tail -50 make.log >&2; exit 1; }
 cp src/aria2c "$OUT"
 strip -x "$OUT"
 

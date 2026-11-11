@@ -7,6 +7,15 @@ components) and uses [aria2](https://aria2.github.io) as its download engine. Th
 content panel, grouped dense lists, a detail sidebar, a ⌘K command palette and a quiet indigo theme in light
 and dark.
 
+![YADM in dark theme](docs/screenshots/dark.png)
+
+<details>
+<summary>Light theme</summary>
+
+![YADM in light theme](docs/screenshots/light.png)
+
+</details>
+
 ## Features
 
 - **HTTP(S), FTP, BitTorrent and magnet links**: segmented downloads with several connections per file,

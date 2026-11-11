@@ -1,4 +1,5 @@
 /target
 /dist
 /vendor/aria2c
+/vendor/aria2c.exe
 .DS_Store

@@ -1,41 +1,38 @@
 //! YADM — a Linear-style download manager on gpui + aria2.
 
+// No console window behind the app in Windows release builds.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod actions;
 mod clipboard;
+mod platform;
 mod store;
 mod theme;
+#[cfg(any(target_os = "macos", windows))]
 mod tray;
+/// No tray on Linux (see [`platform::HAS_TRAY`]): closing the window quits.
+#[cfg(not(any(target_os = "macos", windows)))]
+mod tray {
+    pub fn start(_: &mut gpui_kit::App) {}
+    pub fn is_active() -> bool {
+        false
+    }
+}
 mod ui;
 
 use actions::*;
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
-use std::path::PathBuf;
 use std::time::Duration;
 use store::AppStore;
 use ui::AppView;
+use ui::kit::dp;
 use yadm_core::{Engine, Paths, Settings};
-
-/// True when running from a `.app` bundle (system notifications need one).
-pub fn is_bundled() -> bool {
-    std::env::current_exe().is_ok_and(|p| p.to_string_lossy().contains(".app/Contents/MacOS"))
-}
-
-/// Where the unpacked browser extension lives: inside the bundle, else the repo.
-pub fn extension_dir() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(res) = exe.parent().and_then(|p| p.parent()).map(|p| p.join("Resources/extension"))
-        && res.exists()
-    {
-        return res;
-    }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extension")
-}
 
 pub fn open_main_window(cx: &mut App) {
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::centered(size(px(1260.), px(800.)), cx)),
-        window_min_size: Some(size(px(880.), px(520.))),
+        window_bounds: Some(WindowBounds::centered(size(dp(1260.), dp(800.)), cx)),
+        window_min_size: Some(size(dp(880.), dp(520.))),
         titlebar: Some(TitlebarOptions {
             traffic_light_position: Some(point(px(16.), px(14.))),
             ..TitleBar::title_bar_options()
@@ -44,22 +41,50 @@ pub fn open_main_window(cx: &mut App) {
         ..Default::default()
     };
     let result = gpui_kit::open_window(options, cx, |window, cx| {
-        window.on_window_should_close(cx, |window, cx| {
-            if AppStore::global(cx).read(cx).settings().close_to_tray {
-                // Keep downloading in the background; the menu bar item brings it back.
-                window.minimize_window();
-                cx.hide();
-                false
-            } else {
-                cx.dispatch_action(&Quit);
-                false
-            }
-        });
+        window.on_window_should_close(cx, should_close_window);
         cx.new(|cx| AppView::new(window, cx))
     });
     if let Err(e) = result {
         tracing::error!("failed to open window: {e:#}");
     }
+}
+
+/// Close-button policy. With "close to tray" the app keeps downloading in the
+/// background: macOS hides it (the Dock and menu bar bring it back), other
+/// platforms close the window and the tray icon reopens it. Returns whether
+/// the window should actually close.
+pub fn should_close_window(window: &mut Window, cx: &mut App) -> bool {
+    // This runs inside the window's own update, where dispatching an action
+    // can't re-enter the window ("window not found"); quit once it's done.
+    if !AppStore::global(cx).read(cx).settings().close_to_tray {
+        cx.defer(quit);
+        return false;
+    }
+    if platform::IS_MAC {
+        window.minimize_window();
+        cx.hide();
+        false
+    } else if tray::is_active() {
+        true
+    } else {
+        // No tray icon to come back through: quitting beats an invisible app.
+        cx.defer(quit);
+        false
+    }
+}
+
+/// ⌘W / Ctrl+W: put the window away without quitting.
+fn hide_window(cx: &mut App) {
+    if platform::IS_MAC {
+        cx.hide();
+        return;
+    }
+    let Some(w) = cx.active_window().or_else(|| cx.windows().first().copied()) else { return };
+    let to_tray = tray::is_active();
+    // Actions run while the window is being updated; touch it afterwards.
+    cx.defer(move |cx| {
+        w.update(cx, |_, window, _| if to_tray { window.remove_window() } else { window.minimize_window() }).ok();
+    });
 }
 
 fn quit(cx: &mut App) {
@@ -118,7 +143,8 @@ fn main() {
     let settings = Settings::load(&paths.settings());
     let engine = Engine::start(paths, settings.clone());
 
-    let app = gpui_kit::application().with_assets(gpui_kit::assets::AllAssets);
+    // The tray keeps YADM alive with no window open (macOS and Windows).
+    let app = gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).with_quit_mode(QuitMode::Explicit);
     app.on_reopen(|cx| {
         if cx.windows().is_empty() {
             open_main_window(cx);
@@ -127,13 +153,14 @@ fn main() {
     });
     app.run(move |cx| {
         gpui_kit::init(cx);
+        ui::kit::set_ui_scale(settings.ui_scale);
         theme::init(settings.theme, cx);
         actions::bind(cx);
         ui::add::bind(cx);
         store::new_store(engine, settings, cx);
 
         cx.on_action(|_: &Quit, cx| quit(cx));
-        cx.on_action(|_: &HideWindow, cx| cx.hide());
+        cx.on_action(|_: &HideWindow, cx| hide_window(cx));
         set_menus(cx);
 
         open_main_window(cx);

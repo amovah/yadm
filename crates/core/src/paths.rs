@@ -3,7 +3,7 @@ use std::path::PathBuf;
 /// Filesystem locations used by the app.
 #[derive(Debug, Clone)]
 pub struct Paths {
-    /// `~/Library/Application Support/YADM` on macOS.
+    /// `~/Library/Application Support/YADM` on macOS, `%APPDATA%\YADM` on Windows.
     pub data_dir: PathBuf,
 }
 

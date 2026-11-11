@@ -1,5 +1,6 @@
 //! App-wide actions and their default key bindings.
 
+use crate::platform::keys;
 use gpui_kit::{App, KeyBinding};
 
 gpui_kit::actions!(
@@ -55,27 +56,27 @@ pub const LIST_CONTEXT: &str = "DownloadList";
 pub fn bind(cx: &mut App) {
     let l = Some(LIST_CONTEXT);
     cx.bind_keys([
-        KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("cmd-w", HideWindow, None),
-        KeyBinding::new("cmd-n", NewDownload, None),
-        KeyBinding::new("cmd-k", OpenCommandPalette, None),
-        KeyBinding::new("cmd-,", OpenSettings, None),
-        KeyBinding::new("cmd-1", ShowAll, None),
-        KeyBinding::new("cmd-2", ShowActive, None),
-        KeyBinding::new("cmd-3", ShowQueued, None),
-        KeyBinding::new("cmd-4", ShowPaused, None),
-        KeyBinding::new("cmd-5", ShowCompleted, None),
-        KeyBinding::new("cmd-6", ShowFailed, None),
-        KeyBinding::new("cmd-alt-p", PauseAll, None),
-        KeyBinding::new("cmd-alt-r", ResumeAll, None),
+        KeyBinding::new(keys("cmd-q"), Quit, None),
+        KeyBinding::new(keys("cmd-w"), HideWindow, None),
+        KeyBinding::new(keys("cmd-n"), NewDownload, None),
+        KeyBinding::new(keys("cmd-k"), OpenCommandPalette, None),
+        KeyBinding::new(keys("cmd-,"), OpenSettings, None),
+        KeyBinding::new(keys("cmd-1"), ShowAll, None),
+        KeyBinding::new(keys("cmd-2"), ShowActive, None),
+        KeyBinding::new(keys("cmd-3"), ShowQueued, None),
+        KeyBinding::new(keys("cmd-4"), ShowPaused, None),
+        KeyBinding::new(keys("cmd-5"), ShowCompleted, None),
+        KeyBinding::new(keys("cmd-6"), ShowFailed, None),
+        KeyBinding::new(keys("cmd-alt-p"), PauseAll, None),
+        KeyBinding::new(keys("cmd-alt-r"), ResumeAll, None),
         // List-focused, Linear-style single keys.
-        KeyBinding::new("cmd-v", PasteDownload, l),
+        KeyBinding::new(keys("cmd-v"), PasteDownload, l),
         KeyBinding::new("j", SelectNext, l),
         KeyBinding::new("down", SelectNext, l),
         KeyBinding::new("k", SelectPrev, l),
         KeyBinding::new("up", SelectPrev, l),
         KeyBinding::new("x", ToggleSelect, l),
-        KeyBinding::new("cmd-a", SelectAll, l),
+        KeyBinding::new(keys("cmd-a"), SelectAll, l),
         KeyBinding::new("space", ToggleDetails, l),
         KeyBinding::new("enter", ToggleDetails, l),
         KeyBinding::new("escape", CloseOverlay, l),
@@ -84,12 +85,12 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("r", RetrySelected, l),
         KeyBinding::new("backspace", RemoveSelected, l),
         KeyBinding::new("delete", RemoveSelected, l),
-        KeyBinding::new("cmd-backspace", RemoveSelectedWithFiles, l),
-        KeyBinding::new("cmd-o", RevealSelected, l),
-        KeyBinding::new("cmd-shift-o", OpenSelected, l),
-        KeyBinding::new("cmd-shift-c", CopySourceUrl, l),
+        KeyBinding::new(keys("cmd-backspace"), RemoveSelectedWithFiles, l),
+        KeyBinding::new(keys("cmd-o"), RevealSelected, l),
+        KeyBinding::new(keys("cmd-shift-o"), OpenSelected, l),
+        KeyBinding::new(keys("cmd-shift-c"), CopySourceUrl, l),
         KeyBinding::new("/", FocusSearch, l),
-        KeyBinding::new("cmd-f", FocusSearch, None),
+        KeyBinding::new(keys("cmd-f"), FocusSearch, None),
         KeyBinding::new("alt-up", MoveUp, l),
         KeyBinding::new("alt-down", MoveDown, l),
     ]);

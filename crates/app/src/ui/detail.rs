@@ -11,6 +11,7 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use crate::ui::kit::dp;
 use super::kit::PressableExt as _;
 use yadm_core::{Category, Command, Download, DownloadKind, State, format};
 
@@ -155,7 +156,7 @@ impl AppView {
                             .small()
                             .ghost()
                             .icon(Icon::new(Lucide::FolderOpen))
-                            .tooltip("Show in Finder  ⌘O")
+                            .tooltip(format!("{}  {}", crate::platform::REVEAL, crate::platform::shortcut("⌘O")))
                             .on_click(|_, window, cx| window.dispatch_action(Box::new(RevealSelected), cx)).pressable("detail-reveal"),
                     )
                     .child(
@@ -247,7 +248,7 @@ impl AppView {
                     div()
                         .mt_2()
                         .p_2()
-                        .rounded(px(6.))
+                        .rounded(dp(6.))
                         .border_1()
                         .border_color(p.red.opacity(0.3))
                         .bg(p.red.opacity(0.08))
@@ -279,12 +280,12 @@ impl AppView {
                 Some(peers) if !peers.is_empty() => v_flex()
                     .children(peers.iter().map(|peer| {
                         h_flex()
-                            .h(px(26.))
+                            .h(dp(26.))
                             .gap_2()
                             .text_xs()
                             .child(div().flex_1().truncate().child(format!("{}:{}", peer.ip, peer.port)))
                             .when(peer.seeder, |this| this.child(div().text_color(p.green).child("seed")))
-                            .child(div().w(px(72.)).text_right().text_color(theme.muted_foreground).child(format!("↓ {}", format::speed(peer.download_speed))))
+                            .child(div().w(dp(72.)).text_right().text_color(theme.muted_foreground).child(format!("↓ {}", format::speed(peer.download_speed))))
                     }))
                     .into_any_element(),
                 _ => empty("No connected peers"),
@@ -293,7 +294,7 @@ impl AppView {
                 Some(s) if !s.is_empty() => v_flex()
                     .children(s.iter().map(|srv| {
                         h_flex()
-                            .h(px(26.))
+                            .h(dp(26.))
                             .gap_2()
                             .text_xs()
                             .child(div().flex_1().truncate().child(srv.current_uri.clone()))
@@ -315,7 +316,7 @@ impl AppView {
                             .gap_2()
                             .py_0p5()
                             .text_xs()
-                            .child(div().w(px(150.)).flex_shrink_0().truncate().text_color(theme.muted_foreground).child(k.clone()))
+                            .child(div().w(dp(150.)).flex_shrink_0().truncate().text_color(theme.muted_foreground).child(k.clone()))
                             .child(div().flex_1().truncate().child(v.clone()))
                     }))
                     .into_any_element(),
@@ -324,7 +325,7 @@ impl AppView {
         };
 
         v_flex()
-            .w(px(400.))
+            .w(dp(400.))
             .h_full()
             .flex_shrink_0()
             .border_l_1()

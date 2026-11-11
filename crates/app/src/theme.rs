@@ -1,7 +1,7 @@
 //! Linear-style theme for gpui-component, loaded from `themes/linear.json`.
 
 use gpui_kit::component::{Theme, ThemeMode, ThemeRegistry};
-use gpui_kit::{App, Hsla, WindowAppearance, rgb};
+use gpui_kit::{App, Hsla, WindowAppearance, px, rgb};
 use yadm_core::ThemePref;
 
 const LINEAR: &str = include_str!("../../../themes/linear.json");
@@ -35,6 +35,14 @@ pub fn apply(pref: ThemePref, cx: &mut App) {
         },
     };
     Theme::change(mode, None, cx);
+    // Changing mode reloads the theme file, so the scaled sizes are reapplied
+    // from fixed bases every time. gpui-component sizes its controls in rems
+    // derived from `font_size`, so this scales them along with the text.
+    let scale = crate::ui::kit::ui_scale();
+    let theme = Theme::global_mut(cx);
+    theme.font_size = px(14. * scale);
+    theme.mono_font_size = px(13. * scale);
+    cx.refresh_windows();
 }
 
 /// Status colors used for rings, chips and progress bars.

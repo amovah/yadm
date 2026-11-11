@@ -9,6 +9,7 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{ActiveTheme as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use crate::ui::kit::dp;
 use std::collections::{BTreeSet, HashSet};
 use std::time::Duration;
 use yadm_core::{AddRequest, Category, Command, Download, State, ToastKind};
@@ -221,14 +222,14 @@ impl AppView {
                 let id = id.clone();
                 let mut n = Notification::success(name.clone()).title("Download complete").action(move |_, _, _| {
                     let id = id.clone();
-                    gpui_kit::component::button::Button::new("reveal").label("Show in Finder").on_click(move |_, _, cx| {
+                    gpui_kit::component::button::Button::new("reveal").label(crate::platform::REVEAL).on_click(move |_, _, cx| {
                         let store = AppStore::global(cx);
                         if let Some(p) = store.read(cx).download(&id).and_then(|d| d.local_path()) {
                             cx.reveal_path(&p);
                         }
                     })
                 });
-                if !window.is_window_active() && crate::is_bundled() {
+                if !window.is_window_active() && crate::platform::system_notifications() {
                     n = n.in_app_and_system();
                 }
                 n
@@ -396,7 +397,7 @@ impl AppView {
             return;
         }
         let description = if delete_files {
-            "The downloaded files will be moved to the Trash."
+            if cfg!(windows) { "The downloaded files will be moved to the Recycle Bin." } else { "The downloaded files will be moved to the Trash." }
         } else {
             "Transfers stop and partial files stay on disk."
         };
@@ -404,10 +405,11 @@ impl AppView {
             let ids = ids.clone();
             let store = store.clone();
             alert
+                .entrance(gpui_kit::component::dialog::DialogEntrance::None)
                 .title(title.clone())
                 .description(description)
                 .show_cancel(true)
-                .ok_text(if delete_files { "Move to Trash" } else { "Remove" })
+                .ok_text(if delete_files { if cfg!(windows) { "Move to Recycle Bin" } else { "Move to Trash" } } else { "Remove" })
                 .ok_variant(gpui_kit::component::button::ButtonVariant::Danger)
                 .on_ok(move |_, _, cx| {
                     store.read(cx).send(Command::Remove { ids: ids.clone(), delete_files });
@@ -567,11 +569,15 @@ impl Focusable for AppView {
 
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Windows and client-decorated Linux get a caption row with window controls.
+        let title_bar = crate::ui::kit::title_bar(window, cx);
         let root = h_flex()
-            .size_full()
+            .w_full()
+            .flex_1()
+            .min_h_0()
             .bg(cx.theme().sidebar)
             .text_color(cx.theme().foreground)
-            .text_size(px(14.));
+            .text_size(dp(14.));
         // Settings take over the whole window, with their own sidebar.
         let root = if let (Nav::Settings, Some(view)) = (&self.nav, &self.settings_view) {
             root.child(view.clone())
@@ -584,7 +590,7 @@ impl Render for AppView {
                 div().flex_1().min_w_0().h_full().py_2().pr_2().child(
                     v_flex()
                         .size_full()
-                        .rounded(px(10.))
+                        .rounded(dp(10.))
                         .border_1()
                         .border_color(cx.theme().border)
                         .bg(cx.theme().background)
@@ -613,6 +619,7 @@ impl Render for AppView {
                     }
                 }
             }));
-        self.register_global_actions(root, cx)
+        let root = self.register_global_actions(root, cx);
+        v_flex().size_full().bg(cx.theme().sidebar).children(title_bar).child(root)
     }
 }

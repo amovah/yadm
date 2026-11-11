@@ -29,8 +29,9 @@ pub struct Sidecar {
 }
 
 /// Looks for aria2c: `$YADM_ARIA2C`, next to the running executable (the
-/// bundled sidecar in `Contents/MacOS`), then `PATH` and Homebrew prefixes
-/// (GUI apps launched from Finder get a minimal `PATH`).
+/// bundled sidecar in `Contents/MacOS`, or beside `yadm.exe`), then `PATH`
+/// and the usual package manager locations (GUI apps launched from Finder
+/// get a minimal `PATH`; Scoop/Chocolatey/winget shims may be missing too).
 pub fn find_aria2c() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("YADM_ARIA2C").map(PathBuf::from)
         && p.is_file()
@@ -48,10 +49,26 @@ pub fn find_aria2c() -> Option<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
-    dirs.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].map(PathBuf::from));
+    dirs.extend(extra_dirs());
     dirs.into_iter()
         .map(|d| d.join(exe_name()))
         .find(|p| p.is_file())
+}
+
+fn extra_dirs() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
+        [
+            env("USERPROFILE").map(|h| h.join("scoop").join("shims")),
+            env("ProgramData").map(|p| p.join("chocolatey").join("bin")),
+            env("LOCALAPPDATA").map(|p| p.join("Microsoft").join("WinGet").join("Links")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    } else {
+        ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].map(PathBuf::from).into()
+    }
 }
 
 fn exe_name() -> &'static str {
@@ -119,7 +136,12 @@ impl Sidecar {
         }
 
         tracing::info!(binary = %binary.display(), port, "spawning aria2c");
-        let child = Command::new(&binary)
+        let mut cmd = Command::new(&binary);
+        // aria2c is a console program: without this a GUI parent on Windows
+        // flashes up a console window for it.
+        #[cfg(windows)]
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        let child = cmd
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

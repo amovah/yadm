@@ -11,6 +11,7 @@ use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _};
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use crate::ui::kit::dp;
 use super::kit::PressableExt as _;
 use std::ops::Range;
 use yadm_core::{Command, Download, State, format};
@@ -29,7 +30,7 @@ impl AppView {
         let id = ElementId::Name(format!("group-{key:?}").into());
         h_flex()
             .id(id)
-            .h(px(ROW_H))
+            .h(dp(ROW_H))
             .px_4()
             .gap_2()
             .bg(theme.list_head)
@@ -88,7 +89,7 @@ impl AppView {
 
         h_flex()
             .id(ElementId::Name(format!("row-{}", d.id).into()))
-            .h(px(ROW_H))
+            .h(dp(ROW_H))
             .pl_4()
             .pr_4()
             .gap_3()
@@ -101,18 +102,18 @@ impl AppView {
             .child(
                 // Selection rail, like Linear's checkbox gutter.
                 div()
-                    .w(px(2.))
-                    .h(px(20.))
+                    .w(dp(2.))
+                    .h(dp(20.))
                     .rounded_full()
                     .when(selected || is_cursor, |this| this.bg(p.accent)),
             )
-            .child(div().w(px(16.)).flex().justify_center().child(status_glyph(d, cx)))
+            .child(div().w(dp(16.)).flex().justify_center().child(status_glyph(d, cx)))
             .child(
                 h_flex()
                     .flex_1()
                     .min_w_0()
                     .gap_2()
-                    .child(div().truncate().flex_shrink(1.).min_w(px(40.)).child(d.name.clone()))
+                    .child(div().truncate().flex_shrink(1.).min_w(dp(40.)).child(d.name.clone()))
                     .child(
                         div()
                             .flex_shrink(1.)
@@ -124,25 +125,25 @@ impl AppView {
             )
             .child(
                 div()
-                    .w(px(96.))
+                    .w(dp(96.))
                     .flex_shrink_0()
                     .when(show_bar, |this| this.child(progress_bar(d.progress(), state_color(d.state, &p, cx), cx))),
             )
             .child(
                 div()
-                    .w(px(48.))
+                    .w(dp(48.))
                     .flex_shrink_0()
                     .text_right()
                     .text_xs()
                     .text_color(theme.muted_foreground)
                     .when(show_bar, |this| this.child(format!("{:.0}%", d.progress() * 100.))),
             )
-            .child(div().w(px(150.)).flex_shrink_0().text_right().text_xs().text_color(theme.muted_foreground).child(size))
-            .child(div().w(px(130.)).flex_shrink_0().text_right().text_xs().text_color(theme.muted_foreground).child(speed_or_status))
-            .child(div().w(px(96.)).flex_shrink_0().flex().justify_end().child(chip(d.category.label(), Some(category_icon(d.category)), cx)))
+            .child(div().w(dp(150.)).flex_shrink_0().text_right().text_xs().text_color(theme.muted_foreground).child(size))
+            .child(div().w(dp(130.)).flex_shrink_0().text_right().text_xs().text_color(theme.muted_foreground).child(speed_or_status))
+            .child(div().w(dp(96.)).flex_shrink_0().flex().justify_end().child(chip(d.category.label(), Some(category_icon(d.category)), cx)))
             .child(
                 div()
-                    .w(px(36.))
+                    .w(dp(36.))
                     .flex_shrink_0()
                     .text_right()
                     .text_xs()
@@ -188,14 +189,14 @@ impl AppView {
                         _ => menu,
                     };
                     menu.when(d.state == State::Completed, |m| m.menu("Open", Box::new(OpenSelected)))
-                        .menu("Show in Finder", Box::new(RevealSelected))
+                        .menu(crate::platform::REVEAL, Box::new(RevealSelected))
                         .menu("Copy source URL", Box::new(CopySourceUrl))
                         .when(d.state == State::Queued, |m| {
                             m.separator().menu("Move up", Box::new(MoveUp)).menu("Move down", Box::new(MoveDown))
                         })
                         .separator()
                         .menu(if live { "Cancel and remove" } else { "Remove from list" }, Box::new(RemoveSelected))
-                        .menu("Remove and move files to Trash", Box::new(RemoveSelectedWithFiles))
+                        .menu(format!("Remove and move files to {}", crate::platform::TRASH), Box::new(RemoveSelectedWithFiles))
                 }
             })
             .into_any_element()
@@ -221,7 +222,7 @@ impl AppView {
         };
         let group_by = self.group_by;
         h_flex()
-            .h(px(48.))
+            .h(dp(48.))
             .flex_shrink_0()
             .px_4()
             .gap_2()
@@ -231,7 +232,7 @@ impl AppView {
             .child(div().text_color(theme.muted_foreground).child(total.to_string()))
             .child(div().flex_1())
             .child(
-                div().w(px(220.)).child(
+                div().w(dp(220.)).child(
                     Input::new(&self.search)
                         .small()
                         .prefix(Icon::new(Lucide::Search).xsmall().text_color(theme.muted_foreground))
@@ -255,7 +256,7 @@ impl AppView {
                     .ghost()
                     .small()
                     .icon(Icon::new(Lucide::Pause))
-                    .tooltip("Pause all  ⌥⌘P")
+                    .tooltip(format!("Pause all  {}", crate::platform::shortcut("⌥⌘P")))
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(PauseAll), cx)).pressable("pause-all"),
             )
             .child(
@@ -263,7 +264,7 @@ impl AppView {
                     .ghost()
                     .small()
                     .icon(Icon::new(Lucide::Play))
-                    .tooltip("Resume all  ⌥⌘R")
+                    .tooltip(format!("Resume all  {}", crate::platform::shortcut("⌥⌘R")))
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(ResumeAll), cx)).pressable("resume-all"),
             )
             .child(
@@ -295,8 +296,8 @@ impl AppView {
             .gap_3()
             .child(
                 div()
-                    .size(px(48.))
-                    .rounded(px(12.))
+                    .size(dp(48.))
+                    .rounded(dp(12.))
                     .border_1()
                     .border_color(theme.border)
                     .flex()
@@ -310,16 +311,16 @@ impl AppView {
                     .gap_1()
                     .text_color(theme.muted_foreground)
                     .child("Paste a link with")
-                    .child(kbd("⌘ V", cx))
+                    .child(kbd(&crate::platform::shortcut("⌘V"), cx))
                     .child("or create one with")
-                    .child(kbd("⌘ N", cx)),
+                    .child(kbd(&crate::platform::shortcut("⌘N"), cx)),
             )
             .when(!filtered, |this| {
                 this.child(
                     Button::new("empty-add")
                         .primary()
                         .small()
-                        .child(h_flex().gap_1p5().child("New download").child(kbd_on("⌘N", theme.primary_foreground)))
+                        .child(h_flex().gap_1p5().child("New download").child(kbd_on(&crate::platform::shortcut("⌘N"), theme.primary_foreground)))
                         .on_click(|_, window, cx| window.dispatch_action(Box::new(NewDownload), cx)).pressable("empty-add"),
                 )
             })
@@ -339,7 +340,7 @@ impl AppView {
                     .gap_1()
                     .p_1()
                     .pl_3()
-                    .rounded(px(8.))
+                    .rounded(dp(8.))
                     .border_1()
                     .border_color(theme.border)
                     .bg(theme.popover)
@@ -354,7 +355,7 @@ impl AppView {
                     .child(Button::new("bulk-remove").ghost().small().icon(Icon::new(Lucide::Trash)).label("Remove").on_click(cx.listener(
                         move |this, _, window, cx| this.confirm_remove(ids.clone(), false, window, cx),
                     )).pressable("bulk-remove"))
-                    .child(div().w_px().h(px(16.)).bg(theme.border))
+                    .child(div().w_px().h(dp(16.)).bg(theme.border))
                     .child(Button::new("bulk-clear").ghost().small().icon(Icon::new(Lucide::X)).tooltip("Clear selection  Esc").on_click(cx.listener(
                         |this, _, _, cx| {
                             this.selected.clear();

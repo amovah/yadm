@@ -10,7 +10,9 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use crate::ui::kit::dp;
 use super::kit::PressableExt as _;
+use crate::platform::{keys, shortcut};
 use std::cell::Cell;
 use std::path::PathBuf;
 use yadm_core::{AddRequest, Category, Command, format};
@@ -47,8 +49,9 @@ impl AddDownload {
                 view.read(cx).urls.read(cx).focus_handle(cx).focus(window, cx);
             }
             dialog
+                .entrance(gpui_kit::component::dialog::DialogEntrance::None)
                 .title(h_flex().gap_2().child(Icon::new(Lucide::ArrowDownToLine).small()).child("New download"))
-                .w(px(600.))
+                .w(dp(600.))
                 .child(view.clone())
         });
     }
@@ -230,7 +233,7 @@ impl Render for AddDownload {
                 this.category = a.category.as_deref().map(Category::parse);
                 cx.notify();
             }))
-            .child(Textarea::new(&self.urls).h(px(110.)))
+            .child(Textarea::new(&self.urls).h(dp(110.)))
             .child(
                 h_flex()
                     .gap_2()
@@ -261,14 +264,14 @@ impl Render for AddDownload {
                         this.child(
                             h_flex()
                                 .gap_3()
-                                .child(div().w(px(96.)).text_sm().text_color(theme.muted_foreground).child("File name"))
+                                .child(div().w(dp(96.)).text_sm().text_color(theme.muted_foreground).child("File name"))
                                 .child(div().flex_1().child(Input::new(&self.filename).small())),
                         )
                     })
                     .child(
                         h_flex()
                             .gap_3()
-                            .child(div().w(px(96.)).text_sm().text_color(theme.muted_foreground).child("Save to"))
+                            .child(div().w(dp(96.)).text_sm().text_color(theme.muted_foreground).child("Save to"))
                             .child(
                                 h_flex()
                                     .flex_1()
@@ -282,7 +285,7 @@ impl Render for AddDownload {
                     .child(
                         h_flex()
                             .gap_3()
-                            .child(div().w(px(96.)).text_sm().text_color(theme.muted_foreground).child("Category"))
+                            .child(div().w(dp(96.)).text_sm().text_color(theme.muted_foreground).child("Category"))
                             .child(
                                 Button::new("pick-category")
                                     .small()
@@ -304,8 +307,8 @@ impl Render for AddDownload {
                     .child(
                         h_flex()
                             .gap_3()
-                            .child(div().w(px(96.)).text_sm().text_color(theme.muted_foreground).child("Speed limit"))
-                            .child(div().w(px(220.)).child(Input::new(&self.limit).small())),
+                            .child(div().w(dp(96.)).text_sm().text_color(theme.muted_foreground).child("Speed limit"))
+                            .child(div().w(dp(220.)).child(Input::new(&self.limit).small())),
                     ),
             )
             .when_some(self.error.clone(), |this, e| {
@@ -331,7 +334,7 @@ impl Render for AddDownload {
                         Button::new("submit")
                             .small()
                             .primary()
-                            .child(h_flex().gap_1p5().child("Add download").child(kbd_on("⌘↵", theme.primary_foreground)))
+                            .child(h_flex().gap_1p5().child("Add download").child(kbd_on(&shortcut("⌘↵"), theme.primary_foreground)))
                             .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))).pressable("submit"),
                     ),
             )
@@ -339,5 +342,5 @@ impl Render for AddDownload {
 }
 
 pub fn bind(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("cmd-enter", Submit, Some("AddDownload"))]);
+    cx.bind_keys([KeyBinding::new(keys("cmd-enter"), Submit, Some("AddDownload"))]);
 }

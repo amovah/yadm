@@ -10,6 +10,25 @@ use yadm_core::{Category, Download, State};
 
 pub const ROW_H: f32 = 40.;
 
+/// Interface scale as f32 bits; see [`set_ui_scale`].
+static UI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3f80_0000); // 1.0
+
+pub fn ui_scale() -> f32 {
+    f32::from_bits(UI_SCALE.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Sets the interface scale from the user's setting (`None` = system).
+pub fn set_ui_scale(setting: Option<f32>) {
+    let scale = setting.filter(|s| (0.5..=3.0).contains(s)).unwrap_or_else(crate::platform::system_ui_scale);
+    UI_SCALE.store(scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A size in design pixels, multiplied by the interface scale. Use this
+/// instead of `px` for every layout size so the whole UI grows together.
+pub fn dp(v: f32) -> Pixels {
+    px(v * ui_scale())
+}
+
 pub fn state_color(state: State, p: &Palette, cx: &App) -> Hsla {
     match state {
         State::Active => p.accent,
@@ -63,7 +82,7 @@ pub fn status_glyph(d: &Download, cx: &App) -> AnyElement {
 /// A 3px rounded progress track.
 pub fn progress_bar(value: f32, color: Hsla, cx: &App) -> Div {
     div()
-        .h(px(3.))
+        .h(dp(3.))
         .w_full()
         .rounded_full()
         .bg(cx.theme().muted)
@@ -87,14 +106,14 @@ pub fn kbd_on(keys: &str, fg: Hsla) -> Div {
 fn kbd_colored(keys: &str, fg: Hsla, bg: Hsla) -> Div {
     div()
         .px_1()
-        .h(px(18.))
+        .h(dp(18.))
         .flex()
         .items_center()
-        .rounded(px(4.))
+        .rounded(dp(4.))
         .bg(bg)
         .text_color(fg)
-        .text_size(px(12.))
-        .line_height(px(18.))
+        .text_size(dp(12.))
+        .line_height(dp(18.))
         .child(keys.replace(' ', ""))
 }
 
@@ -103,11 +122,11 @@ pub fn chip(label: impl Into<SharedString>, icon: Option<Lucide>, cx: &App) -> D
     h_flex()
         .gap_1()
         .px_1p5()
-        .h(px(22.))
+        .h(dp(22.))
         .rounded_full()
         .border_1()
         .border_color(cx.theme().border)
-        .text_size(px(12.))
+        .text_size(dp(12.))
         .text_color(cx.theme().muted_foreground)
         .when_some(icon, |this, i| this.child(Icon::new(i).xsmall()))
         .child(label.into())
@@ -125,35 +144,105 @@ pub fn section_label(text: impl Into<SharedString>, cx: &App) -> Div {
 /// A key/value row in the detail panel property list.
 pub fn property(label: impl Into<SharedString>, value: impl IntoElement, cx: &App) -> Div {
     h_flex()
-        .min_h(px(30.))
+        .min_h(dp(30.))
         .gap_3()
         .items_start()
         .child(
             div()
-                .w(px(96.))
+                .w(dp(96.))
                 .flex_shrink_0()
-                .pt(px(5.))
+                .pt(dp(5.))
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
                 .child(label.into()),
         )
-        .child(div().flex_1().min_w_0().pt(px(4.)).text_sm().child(value))
+        .child(div().flex_1().min_w_0().pt(dp(4.)).text_sm().child(value))
 }
 
 /// Empty strip at the top of a sidebar that clears the macOS traffic lights
-/// and doubles as the window drag area.
+/// and doubles as the window drag area. Elsewhere [`title_bar`] spans the
+/// window instead, so the strip collapses.
 pub fn window_drag_area(id: &'static str) -> Stateful<Div> {
-    div()
-        .id(id)
-        .h(px(40.))
-        .flex_shrink_0()
-        .on_mouse_down(MouseButton::Left, |ev: &MouseDownEvent, window, _| {
-            if ev.click_count >= 2 {
-                window.titlebar_double_click();
-            } else {
-                window.start_window_move();
-            }
-        })
+    drag_region(div().id(id).h(dp(if crate::platform::IS_MAC { 40. } else { 0. })).flex_shrink_0())
+}
+
+/// Makes `el` move the window when dragged and maximize on double click.
+fn drag_region(el: Stateful<Div>) -> Stateful<Div> {
+    if cfg!(windows) {
+        // Windows hit-tests this as the caption, which also gives native
+        // double-click, snapping and the system menu.
+        return el.window_control_area(WindowControlArea::Drag);
+    }
+    el.on_mouse_down(MouseButton::Left, |ev: &MouseDownEvent, window, _| {
+        if ev.click_count >= 2 {
+            window.titlebar_double_click();
+        } else {
+            window.start_window_move();
+        }
+    })
+}
+
+pub const TITLE_BAR_H: f32 = 34.;
+
+/// Window caption for Windows and client-decorated Linux: a drag strip with
+/// minimize / maximize / close on the right. `None` where the OS draws its
+/// own controls (macOS traffic lights, server-side decorations).
+pub fn title_bar(window: &Window, cx: &App) -> Option<AnyElement> {
+    if crate::platform::IS_MAC {
+        return None;
+    }
+    if cfg!(target_os = "linux") && !matches!(window.window_decorations(), Decorations::Client { .. }) {
+        return None;
+    }
+    let supported = window.window_controls();
+    let control = |id: &'static str, icon: Lucide, area: WindowControlArea, close: bool| {
+        let theme = cx.theme();
+        let (hover_bg, hover_fg) = if close { (theme.danger, theme.danger_foreground) } else { (theme.secondary_hover, theme.foreground) };
+        div()
+            .id(id)
+            .w(dp(46.))
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .flex_shrink_0()
+            .text_color(theme.muted_foreground)
+            .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
+            .when(cfg!(windows), |el| el.window_control_area(area))
+            .when(!cfg!(windows), |el| {
+                el.on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+                .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
+                    match area {
+                        WindowControlArea::Min => window.minimize_window(),
+                        WindowControlArea::Max => window.zoom_window(),
+                        _ => {
+                            if crate::should_close_window(window, cx) {
+                                window.remove_window();
+                            }
+                        }
+                    }
+                })
+            })
+            .child(Icon::new(icon).small())
+    };
+    Some(
+        h_flex()
+            .h(dp(TITLE_BAR_H))
+            .w_full()
+            .flex_shrink_0()
+            .child(drag_region(div().id("title-bar-drag").flex_1().h_full()))
+            .when(supported.minimize, |el| el.child(control("win-min", Lucide::Minus, WindowControlArea::Min, false)))
+            .when(supported.maximize, |el| {
+                let icon = if window.is_maximized() { Lucide::Copy } else { Lucide::Square };
+                el.child(control("win-max", icon, WindowControlArea::Max, false))
+            })
+            .child(control("win-close", Lucide::X, WindowControlArea::Close, true))
+            .into_any_element(),
+    )
 }
 
 /// Snappy, slightly underdamped spring for press feedback.

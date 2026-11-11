@@ -1,12 +1,22 @@
-//! macOS menu bar item showing live speed with quick controls.
+//! Menu bar item (macOS) / system tray icon (Windows, Linux) showing live
+//! speed with quick controls.
 
 use crate::actions::{NewDownload, PauseAll, Quit, ResumeAll};
 use crate::store::AppStore;
 use gpui_kit::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tray_icon::{TrayIcon, TrayIconBuilder};
+use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use yadm_core::format;
+
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Whether the tray icon is currently shown, i.e. a closed window can be
+/// brought back through it.
+pub fn is_active() -> bool {
+    ACTIVE.load(Ordering::Relaxed)
+}
 
 pub struct Tray {
     icon: TrayIcon,
@@ -15,6 +25,8 @@ pub struct Tray {
 
 /// Template glyph matching the app icon: a 3/4 progress ring around a down arrow.
 /// Drawn at 36x36 (@2x of 18pt) with anti-aliased edges via distance fields.
+/// macOS tints the black template itself; elsewhere it's drawn in the app's
+/// indigo, which reads on both light and dark taskbars.
 fn glyph() -> tray_icon::Icon {
     const N: usize = 36;
     let c = (N as f32 - 1.) / 2.;
@@ -43,7 +55,11 @@ fn glyph() -> tray_icon::Icon {
                 - stroke / 2.;
             let d = arc.min(arrow);
             let a = (0.5 - d).clamp(0., 1.);
-            px[(y * N + x) * 4 + 3] = (a * 255.) as u8;
+            let p = &mut px[(y * N + x) * 4..][..4];
+            if !cfg!(target_os = "macos") {
+                p[..3].copy_from_slice(&[0x5E, 0x6A, 0xD2]);
+            }
+            p[3] = (a * 255.) as u8;
         }
     }
     tray_icon::Icon::from_rgba(px, N as u32, N as u32).expect("tray icon")
@@ -68,6 +84,8 @@ impl Tray {
         let icon = TrayIconBuilder::new()
             .with_icon(glyph())
             .with_icon_as_template(true)
+            // Windows convention: left click opens the app, right click the menu.
+            .with_menu_on_left_click(cfg!(target_os = "macos"))
             .with_menu(Box::new(menu))
             .with_tooltip("YADM")
             .build()?;
@@ -77,7 +95,12 @@ impl Tray {
     fn set_speed(&mut self, dl: u64, active: bool) {
         let title = if active && dl > 0 { format!(" {}", format::speed(dl)) } else { String::new() };
         if title != self.last_title {
+            // Titles show next to the icon on macOS only; the tooltip works on Windows.
             self.icon.set_title(if title.is_empty() { None } else { Some(title.clone()) });
+            let tip = if title.is_empty() { "YADM".to_string() } else { format!("YADM —{title}") };
+            if let Err(e) = self.icon.set_tooltip(Some(tip)) {
+                tracing::debug!("tray tooltip: {e}");
+            }
             self.last_title = title;
         }
     }
@@ -106,13 +129,21 @@ pub fn start(cx: &mut App) {
                 match (&mut tray, want) {
                     (None, true) => match Tray::new() {
                         Ok(t) => tray = Some(t),
-                        Err(e) => tracing::warn!("menu bar item unavailable: {e:#}"),
+                        Err(e) => tracing::warn!("tray icon unavailable: {e:#}"),
                     },
                     (Some(_), false) => tray = None,
                     _ => {}
                 }
+                ACTIVE.store(tray.is_some(), Ordering::Relaxed);
                 if let Some((t, ids)) = &mut tray {
                     t.set_speed(dl, active);
+                    while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
+                        if !cfg!(target_os = "macos")
+                            && let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev
+                        {
+                            show_main_window(cx);
+                        }
+                    }
                     while let Ok(ev) = MenuEvent::receiver().try_recv() {
                         let Some((_, what)) = ids.iter().find(|(id, _)| *id == ev.id) else { continue };
                         match *what {

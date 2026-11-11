@@ -64,6 +64,9 @@ pub struct Settings {
     pub show_tray: bool,
     pub notify_on_complete: bool,
     pub theme: ThemePref,
+    /// Interface size multiplier; `None` follows the system (GNOME's text
+    /// scaling on Linux, 1.0 elsewhere since macOS/Windows scale natively).
+    pub ui_scale: Option<f32>,
     pub schedule: Vec<ScheduleRule>,
     /// Raw aria2 options applied globally (advanced).
     pub aria2_options: BTreeMap<String, String>,
@@ -74,7 +77,7 @@ impl Default for Settings {
         Self {
             download_dir: dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")),
             category_folders: false,
-            max_concurrent: 5,
+            max_concurrent: 1,
             split: 8,
             max_connections_per_server: 8,
             max_download_limit: 0,
@@ -88,6 +91,7 @@ impl Default for Settings {
             show_tray: true,
             notify_on_complete: true,
             theme: ThemePref::System,
+            ui_scale: None,
             schedule: vec![],
             aria2_options: BTreeMap::new(),
         }

@@ -10,6 +10,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use crate::ui::kit::dp;
 use super::kit::PressableExt as _;
 use yadm_core::{Category, EngineStatus, State};
 
@@ -29,10 +30,10 @@ impl AppView {
         let id = id.into();
         h_flex()
             .id(id.clone())
-            .h(px(30.))
+            .h(dp(30.))
             .px_2()
             .gap_2()
-            .rounded(px(6.))
+            .rounded(dp(6.))
             .cursor_pointer()
             .text_color(if active { theme.sidebar_accent_foreground } else { theme.sidebar_foreground })
             .when(active, |this| this.bg(theme.sidebar_accent))
@@ -80,7 +81,7 @@ impl AppView {
             }).pressable("app-menu");
         let top_row = h_flex()
             .px_2()
-            .h(px(34.))
+            .h(dp(34.))
             .gap_0p5()
             .child(app_menu)
             .child(div().flex_1())
@@ -89,7 +90,7 @@ impl AppView {
                     .ghost()
                     .small()
                     .icon(Icon::new(Lucide::Search))
-                    .tooltip("Search  ⌘K")
+                    .tooltip(format!("Search  {}", crate::platform::shortcut("⌘K")))
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(OpenCommandPalette), cx)).pressable("sidebar-search"),
             )
             .child(
@@ -97,7 +98,7 @@ impl AppView {
                     .outline()
                     .small()
                     .icon(Icon::new(Lucide::Plus))
-                    .tooltip("New download  ⌘N")
+                    .tooltip(format!("New download  {}", crate::platform::shortcut("⌘N")))
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(NewDownload), cx)).pressable("sidebar-new"),
             );
 
@@ -149,10 +150,10 @@ impl AppView {
         let toggle = (hidden > 0 && any_visible).then(|| {
             h_flex()
                 .id("nav-cat-toggle")
-                .h(px(30.))
+                .h(dp(30.))
                 .px_2()
                 .gap_2()
-                .rounded(px(6.))
+                .rounded(dp(6.))
                 .cursor_pointer()
                 .text_color(theme.muted_foreground)
                 .hover(|this| this.bg(theme.sidebar_accent))
@@ -173,7 +174,7 @@ impl AppView {
                 .px_2()
                 .py_1p5()
                 .gap_2()
-                .rounded(px(6.))
+                .rounded(dp(6.))
                 .bg(theme.muted)
                 .text_xs()
                 .child(Icon::new(Lucide::CalendarClock).xsmall().text_color(p.yellow))
@@ -193,17 +194,17 @@ impl AppView {
                 h_flex()
                     .id("engine-status")
                     .px_2()
-                    .h(px(26.))
+                    .h(dp(26.))
                     .gap_2()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child(div().size(px(6.)).rounded_full().bg(dot))
+                    .child(div().size(dp(6.)).rounded_full().bg(dot))
                     .child(div().flex_1().truncate().child(engine_label.clone()))
                     .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(engine_label.clone()).build(window, cx)),
             );
 
         v_flex()
-            .w(px(248.))
+            .w(dp(248.))
             .h_full()
             .flex_shrink_0()
             .bg(theme.sidebar)

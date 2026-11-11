@@ -847,7 +847,7 @@ impl Actor {
             let mut o = Options::new();
             o.insert("dir".into(), s(dir.display()));
             if single && let Some(f) = req.filename.as_ref().filter(|f| !f.is_empty()) {
-                o.insert("out".into(), s(f));
+                o.insert("out".into(), s(safe_filename(f)));
             }
             if !headers.is_empty() {
                 o.insert("header".into(), json!(headers));
@@ -1149,6 +1149,24 @@ impl Actor {
     }
 }
 
+/// Makes a user- or browser-supplied name valid on this OS (Windows rejects
+/// `<>:"/\\|?*`, control characters, trailing dots/spaces and device names
+/// like `CON`), so aria2 doesn't fail to create the file.
+fn safe_filename(name: &str) -> String {
+    let bad = |c: char| c.is_control() || c == '/' || (cfg!(windows) && matches!(c, '<' | '>' | ':' | '"' | '\\' | '|' | '?' | '*'));
+    let mut out: String = name.chars().map(|c| if bad(c) { '_' } else { c }).collect();
+    if cfg!(windows) {
+        out.truncate(out.trim_end_matches(['.', ' ']).len());
+        let stem = out.split('.').next().unwrap_or_default().to_ascii_uppercase();
+        let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && stem.as_bytes()[3].is_ascii_digit());
+        if reserved {
+            out.insert(0, '_');
+        }
+    }
+    if out.is_empty() { "download".into() } else { out }
+}
+
 /// Files to trash for a removed download: its files, aria2 control files,
 /// and the top-level torrent folder when it lives inside the download dir.
 fn removable_paths(d: &Download) -> Vec<PathBuf> {
@@ -1176,6 +1194,20 @@ fn removable_paths(d: &Download) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filenames() {
+        assert_eq!(safe_filename("a/b.zip"), "a_b.zip");
+        assert_eq!(safe_filename(""), "download");
+        if cfg!(windows) {
+            assert_eq!(safe_filename("what?: \"x\".zip. "), "what__ _x_.zip");
+            assert_eq!(safe_filename("con.txt"), "_con.txt");
+            assert_eq!(safe_filename("COM1"), "_COM1");
+            assert_eq!(safe_filename("console.txt"), "console.txt");
+        } else {
+            assert_eq!(safe_filename("what?.zip"), "what?.zip");
+        }
+    }
 
     #[test]
     fn names() {

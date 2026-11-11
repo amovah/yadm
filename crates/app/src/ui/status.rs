@@ -10,6 +10,7 @@ use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use crate::ui::kit::dp;
 use super::kit::PressableExt as _;
 use yadm_core::format;
 
@@ -55,7 +56,7 @@ impl AppView {
         };
 
         h_flex()
-            .h(px(38.))
+            .h(dp(38.))
             .flex_shrink_0()
             .pl_4()
             .pr_2()

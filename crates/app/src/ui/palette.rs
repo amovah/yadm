@@ -6,6 +6,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::command::{Command, CommandGroup, CommandItem, CommandState};
 use gpui_kit::*;
+use crate::ui::kit::dp;
 use std::cell::Cell;
 
 pub fn open(view: &mut AppView, window: &mut Window, cx: &mut Context<AppView>) {
@@ -52,7 +53,7 @@ pub fn open(view: &mut AppView, window: &mut Window, cx: &mut Context<AppView>) 
             .label("Downloads")
             .items(downloads.iter().map(|(_, name)| CommandItem::new().label(name.clone()).icon(Lucide::File).action(Box::new(ToggleDetails))));
         let this = this.clone();
-        dialog.w(px(560.)).close_button(false).child(
+        dialog.entrance(gpui_kit::component::dialog::DialogEntrance::None).w(dp(560.)).close_button(false).child(
             Command::new(&state)
                 .placeholder("Type a command or search downloads…")
                 .group(actions)

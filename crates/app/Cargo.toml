@@ -19,4 +19,11 @@ serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 schemars = "1"
+
+# Linux is left out: tray-icon needs a GTK event loop there, which gpui doesn't
+# run, and building it would pull in GTK and appindicator.
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
 tray-icon = "0.21"
+
+[build-dependencies]
+embed-resource = "3"

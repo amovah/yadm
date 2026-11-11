@@ -13,6 +13,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Icon, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use crate::ui::kit::dp;
 use super::kit::PressableExt as _;
 use yadm_core::schedule::{ScheduleAction, ScheduleRule};
 use yadm_core::settings::new_token;
@@ -72,7 +73,13 @@ impl Section {
     fn blurb(self) -> &'static str {
         match self {
             Section::General => "Where downloads go and how YADM behaves",
-            Section::Appearance => "Theme and menu bar presence",
+            Section::Appearance => if crate::platform::IS_MAC {
+                "Theme and menu bar presence"
+            } else if crate::platform::HAS_TRAY {
+                "Theme and system tray presence"
+            } else {
+                "Theme"
+            },
             Section::Connections => "How many transfers run and how they connect",
             Section::Bandwidth => "Speed limits and seeding",
             Section::Schedule => "Limit or pause downloads at certain times",
@@ -151,7 +158,7 @@ impl SettingsView {
             }));
             state
         };
-        let max_concurrent = input(s.max_concurrent.to_string(), "5", window, cx, &mut subs);
+        let max_concurrent = input(s.max_concurrent.to_string(), "1", window, cx, &mut subs);
         let split = input(s.split.to_string(), "8", window, cx, &mut subs);
         let per_server = input(s.max_connections_per_server.to_string(), "8", window, cx, &mut subs);
         let user_agent = input(s.user_agent.clone(), "aria2 default", window, cx, &mut subs);
@@ -187,7 +194,7 @@ impl SettingsView {
         subs.push(cx.subscribe_in(&search, window, |this, state, ev, _, cx| {
             if matches!(ev, InputEvent::Change) {
                 this.query = state.read(cx).value().trim().to_lowercase();
-                this.scroll.set_offset(point(px(0.), px(0.)));
+                this.scroll.set_offset(point(dp(0.), dp(0.)));
                 cx.notify();
             }
         }));
@@ -222,7 +229,7 @@ impl SettingsView {
             self.search.update(cx, |s, cx| s.set_value("", window, cx));
             self.query.clear();
         }
-        self.scroll.set_offset(point(px(0.), px(0.)));
+        self.scroll.set_offset(point(dp(0.), dp(0.)));
         cx.notify();
     }
 
@@ -342,6 +349,7 @@ impl SettingsView {
 
     fn save(&mut self, s: Settings, _window: &mut Window, cx: &mut Context<Self>) {
         self.draft = s.clone();
+        crate::ui::kit::set_ui_scale(s.ui_scale);
         crate::theme::apply(s.theme, cx);
         AppStore::global(cx).update(cx, |store, cx| store.update_settings(s, cx));
         cx.notify();
@@ -370,7 +378,7 @@ impl SettingsView {
     fn card(rows: impl IntoIterator<Item = AnyElement>, cx: &App) -> Div {
         let theme = cx.theme();
         v_flex()
-            .rounded(px(8.))
+            .rounded(dp(8.))
             .border_1()
             .border_color(theme.border)
             .bg(theme.background)
@@ -383,7 +391,7 @@ impl SettingsView {
         let theme = cx.theme();
         let haystack = format!("{title} {} {keywords}", description.unwrap_or_default()).to_lowercase();
         let el = h_flex()
-            .min_h(px(56.))
+            .min_h(dp(56.))
             .px_4()
             .py_2()
             .gap_4()
@@ -475,12 +483,12 @@ impl SettingsView {
                             })
                         }
                     })))
-                    .child(div().w(px(72.)).child(Input::new(&row.start).small()))
+                    .child(div().w(dp(72.)).child(Input::new(&row.start).small()))
                     .child(div().text_color(theme.muted_foreground).child("to"))
-                    .child(div().w(px(72.)).child(Input::new(&row.end).small()))
+                    .child(div().w(dp(72.)).child(Input::new(&row.end).small()))
                     .when(matches!(action, ScheduleAction::Limit { .. }), |this| {
                         this.child(div().text_color(theme.muted_foreground).child("max"))
-                            .child(div().w(px(100.)).child(Input::new(&row.limit).small()))
+                            .child(div().w(dp(100.)).child(Input::new(&row.limit).small()))
                     }),
             )
             .into_any_element()
@@ -492,12 +500,20 @@ impl SettingsView {
     fn entries(&self, section: Section, cx: &mut Context<Self>) -> Vec<Entry> {
         let theme = cx.theme().clone();
         let s = &self.draft;
-        let narrow = |e: &Entity<InputState>| div().w(px(120.)).child(Input::new(e).small());
-        let wide = |e: &Entity<InputState>| div().w(px(260.)).child(Input::new(e).small());
+        let narrow = |e: &Entity<InputState>| div().w(dp(120.)).child(Input::new(e).small());
+        let wide = |e: &Entity<InputState>| div().w(dp(260.)).child(Input::new(e).small());
         match section {
             Section::General => {
-                let dir = s.download_dir.display().to_string().replace(&std::env::var("HOME").unwrap_or_default(), "~");
-                vec![
+                let mut dir = s.download_dir.display().to_string();
+                // Shorten the home folder to `~` (USERPROFILE on Windows). An unset
+                // variable must not be replaced: "".replace would hit every char.
+                if let Ok(home) = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                    && !home.is_empty()
+                    && dir.starts_with(&home)
+                {
+                    dir = format!("~{}", &dir[home.len()..]);
+                }
+                let mut rows = vec![
                     Self::row(
                         "Download folder",
                         Some(&dir),
@@ -507,8 +523,12 @@ impl SettingsView {
                     ),
                     Self::row("Save in category folders", Some("Video, Music, Documents… inside the download folder"), "organize sort store", self.switch("category-folders", s.category_folders, cx, |s, v| s.category_folders = v), cx),
                     Self::row("Notify when downloads finish", None, "notification alert complete", self.switch("notify", s.notify_on_complete, cx, |s, v| s.notify_on_complete = v), cx),
-                    Self::row("Keep running when the window closes", None, "background quit close tray", self.switch("close-to-tray", s.close_to_tray, cx, |s, v| s.close_to_tray = v), cx),
-                ]
+                ];
+                // Without a tray there's no way back to a closed window, so closing quits.
+                if crate::platform::HAS_TRAY {
+                    rows.push(Self::row("Keep running when the window closes", None, "background quit close tray", self.switch("close-to-tray", s.close_to_tray, cx, |s, v| s.close_to_tray = v), cx));
+                }
+                rows
             }
             Section::Appearance => {
                 let theme_picker = ButtonGroup::new("theme-pref")
@@ -525,13 +545,29 @@ impl SettingsView {
                         };
                         this.edit(window, cx, |s| s.theme = pref);
                     }));
-                vec![
+                const SIZES: [(Option<f32>, &str); 6] = [(None, "Auto"), (Some(0.9), "90%"), (Some(1.0), "100%"), (Some(1.1), "110%"), (Some(1.25), "125%"), (Some(1.5), "150%")];
+                let size_picker = SIZES
+                    .iter()
+                    .enumerate()
+                    .fold(ButtonGroup::new("ui-scale").small().outline(), |group, (i, (v, label))| {
+                        group.child(Button::new(("ui-scale", i)).label(*label).selected(s.ui_scale == *v))
+                    })
+                    .on_click(cx.listener(|this, ix: &Vec<usize>, window, cx| {
+                        let v = ix.first().and_then(|i| SIZES.get(*i)).and_then(|(v, _)| *v);
+                        this.edit(window, cx, |s| s.ui_scale = v);
+                    }));
+                let auto = format!("Auto follows the system ({:.0}%)", crate::platform::system_ui_scale() * 100.);
+                let mut rows = vec![
                     Self::row("Theme", Some("Follow the system, or always light or dark"), "appearance dark mode light mode color", theme_picker, cx),
-                    Self::row("Show in menu bar", Some("Live speed and quick controls"), "tray status icon", self.switch("show-tray", s.show_tray, cx, |s, v| s.show_tray = v), cx),
-                ]
+                    Self::row("Interface size", Some(&auto), "scale zoom font text size bigger smaller dpi", size_picker, cx),
+                ];
+                if crate::platform::HAS_TRAY {
+                    rows.push(Self::row(if crate::platform::IS_MAC { "Show in menu bar" } else { "Show in system tray" }, Some("Live speed and quick controls"), "tray status icon", self.switch("show-tray", s.show_tray, cx, |s, v| s.show_tray = v), cx));
+                }
+                rows
             }
             Section::Connections => vec![
-                Self::row("Concurrent downloads", Some("How many downloads run at once"), "parallel simultaneous max", narrow(&self.max_concurrent), cx),
+                Self::row("Concurrent downloads", Some("How many downloads run at once; the rest wait in the queue"), "parallel simultaneous max", narrow(&self.max_concurrent), cx),
                 Self::row("Connections per download", Some("Splits a file into this many segments"), "split segments threads", narrow(&self.split), cx),
                 Self::row("Connections per server", None, "max host", narrow(&self.per_server), cx),
                 Self::row("User agent", None, "browser header ua", wide(&self.user_agent), cx),
@@ -566,7 +602,7 @@ impl SettingsView {
             }
             Section::Browser => {
                 let token = s.bridge.token.clone();
-                let ext_dir = crate::extension_dir();
+                let ext_dir = crate::platform::extension_dir();
                 vec![
                     Self::row("Catch browser downloads", Some("Requires the YADM browser extension"), "bridge chrome firefox intercept", self.switch("bridge", s.bridge.enabled, cx, |s, v| s.bridge.enabled = v), cx),
                     Self::row("Start without asking", Some("Otherwise YADM shows the New download dialog"), "auto start confirm", self.switch("bridge-auto", s.bridge.auto_start, cx, |s, v| s.bridge.auto_start = v), cx),
@@ -577,7 +613,7 @@ impl SettingsView {
                         "extension secret key",
                         h_flex()
                             .gap_1()
-                            .child(div().px_2().py_1().rounded(px(4.)).bg(theme.muted).font_family(theme.mono_font_family.clone()).text_xs().child(token.clone()))
+                            .child(div().px_2().py_1().rounded(dp(4.)).bg(theme.muted).font_family(theme.mono_font_family.clone()).text_xs().child(token.clone()))
                             .child(Button::new("copy-token").ghost().small().icon(Icon::new(Lucide::Copy)).tooltip("Copy").on_click(move |_, window, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(token.clone()));
                                 window.push_notification(Notification::info("Token copied"), cx);
@@ -615,7 +651,7 @@ impl SettingsView {
                             .gap_2()
                             .child(div().text_sm().child("aria2 options"))
                             .child(div().text_xs().text_color(theme.muted_foreground).child("Applied to the engine globally, e.g. min-split-size=4M. RPC options are ignored."))
-                            .child(Textarea::new(&self.aria2_options).h(px(90.)))
+                            .child(Textarea::new(&self.aria2_options).h(dp(90.)))
                             .into_any_element(),
                     },
                     Self::row(
@@ -659,10 +695,10 @@ impl SettingsView {
         let back = h_flex()
             .id("settings-back")
             .mx_2()
-            .h(px(30.))
+            .h(dp(30.))
             .px_2()
             .gap_2()
-            .rounded(px(6.))
+            .rounded(dp(6.))
             .cursor_pointer()
             .text_color(theme.muted_foreground)
             .hover(|this| this.bg(theme.sidebar_accent).text_color(theme.foreground))
@@ -697,10 +733,10 @@ impl SettingsView {
                 groups = groups.child(
                     h_flex()
                         .id(ElementId::Name(format!("settings-nav-{}", section.label()).into()))
-                        .h(px(30.))
+                        .h(dp(30.))
                         .px_2()
                         .gap_2()
-                        .rounded(px(6.))
+                        .rounded(dp(6.))
                         .cursor_pointer()
                         .text_color(if active { theme.sidebar_accent_foreground } else { theme.sidebar_foreground })
                         .when(active, |this| this.bg(theme.sidebar_accent))
@@ -716,7 +752,7 @@ impl SettingsView {
         }
 
         v_flex()
-            .w(px(248.))
+            .w(dp(248.))
             .h_full()
             .flex_shrink_0()
             .bg(theme.sidebar)
@@ -729,8 +765,8 @@ impl SettingsView {
 
     fn render_page(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
-        let column = v_flex().w_full().max_w(px(720.)).mx_auto().px_6().pt_10().pb_8().when_some(self.error.clone(), |this, e| {
-            this.child(div().mb_6().p_2().rounded(px(6.)).bg(theme.danger.opacity(0.1)).text_sm().text_color(theme.danger).child(e))
+        let column = v_flex().w_full().max_w(dp(720.)).mx_auto().px_6().pt_10().pb_8().when_some(self.error.clone(), |this, e| {
+            this.child(div().mb_6().p_2().rounded(dp(6.)).bg(theme.danger.opacity(0.1)).text_sm().text_color(theme.danger).child(e))
         });
 
         if self.query.is_empty() {
@@ -815,7 +851,7 @@ impl Render for SettingsView {
                     div()
                         .id("settings-scroll")
                         .size_full()
-                        .rounded(px(10.))
+                        .rounded(dp(10.))
                         .border_1()
                         .border_color(theme.border)
                         .bg(theme.background)

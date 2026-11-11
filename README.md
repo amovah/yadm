@@ -53,8 +53,10 @@ Download the archive for your platform from [Releases](https://github.com/amovah
   will refuse to open it the first time. Either run
   `xattr -dr com.apple.quarantine /Applications/YADM.app`, or try opening it and then choose
   **System Settings → Privacy & Security → Open Anyway**.
-- **Windows** — unzip and run `YADM.exe`. The exe isn't code-signed, so SmartScreen may warn;
-  click **More info → Run anyway**.
+- **Windows** — run `YADM-<version>-windows-x64-setup.exe` (adds YADM to Start and to
+  **Settings → Apps** for uninstalling), or unzip the portable `YADM-<version>-windows-x64.zip`
+  and run `YADM.exe`. Neither is code-signed, so SmartScreen may warn; click
+  **More info → Run anyway**.
 - **Linux** — `tar xzf YADM-<version>-linux-x64.tar.gz` and run `YADM-linux/yadm`. If the
   bundled `aria2c` is missing, install `aria2` from your package manager.
 

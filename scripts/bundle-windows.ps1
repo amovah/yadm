@@ -1,5 +1,6 @@
-# Assembles dist\YADM (and dist\YADM-<version>-windows-x64.zip): yadm.exe with
-# the aria2c.exe sidecar next to it and the browser extension.
+# Assembles dist\YADM, dist\YADM-<version>-windows-x64.zip and, when Inno Setup
+# is installed, dist\YADM-<version>-windows-x64-setup.exe: yadm.exe with the
+# aria2c.exe sidecar next to it and the browser extension.
 # Uses the official aria2 Windows build unless -Aria2c points at one.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\bundle-windows.ps1
@@ -47,3 +48,17 @@ if (Test-Path $Archive) { Remove-Item -Force $Archive }
 Compress-Archive -Path $App -DestinationPath $Archive
 Write-Host "Built $App"
 Write-Host "Packed $Archive"
+
+# Installer (needs Inno Setup 6+: https://jrsoftware.org/isdl.php or `choco install innosetup`).
+$Iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+if (-not $Iscc) {
+    $Iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+if ($Iscc) {
+    & $Iscc /Q "/DAppVersion=$Version" (Join-Path $PSScriptRoot "windows\yadm.iss")
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+    Write-Host "Packed $(Join-Path $Dist "YADM-$Version-windows-x64-setup.exe")"
+} else {
+    Write-Warning "Inno Setup not found; skipped the installer"
+}

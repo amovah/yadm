@@ -17,7 +17,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: v
         run: |
           VERSION="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
@@ -31,13 +31,13 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: scripts/build-linux.sh
       - name: Check bundled aria2c
         run: test -x dist/YADM-linux/aria2c
       - name: Pack
         run: tar -C dist -czf "dist/YADM-${{ needs.version.outputs.version }}-linux-x64.tar.gz" YADM-linux
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: dist/*.tar.gz
@@ -46,6 +46,7 @@ jobs:
   macos:
     needs: version
     strategy:
+      fail-fast: false
       matrix:
         include:
           - runner: macos-latest
@@ -54,7 +55,7 @@ jobs:
             arch: x64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build aria2c
@@ -62,7 +63,7 @@ jobs:
       - run: scripts/bundle-macos.sh
       - name: Pack
         run: ditto -c -k --keepParent dist/YADM.app "dist/YADM-${{ needs.version.outputs.version }}-macos-${{ matrix.arch }}.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}
           path: dist/*.zip
@@ -72,11 +73,11 @@ jobs:
     needs: version
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: powershell -ExecutionPolicy Bypass -File scripts\bundle-windows.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/*.zip
@@ -89,7 +90,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: assets
           merge-multiple: true

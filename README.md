@@ -45,6 +45,19 @@ and dark.
 
 The data folder holds `settings.toml`, `yadm.db` (history) and `engine/` (aria2 session and log).
 
+## Install
+
+Download the archive for your platform from [Releases](https://github.com/amovah/yadm/releases).
+
+- **macOS** — unzip and move `YADM.app` to Applications. The app isn't notarized, so macOS
+  will refuse to open it the first time. Either run
+  `xattr -dr com.apple.quarantine /Applications/YADM.app`, or try opening it and then choose
+  **System Settings → Privacy & Security → Open Anyway**.
+- **Windows** — unzip and run `YADM.exe`. The exe isn't code-signed, so SmartScreen may warn;
+  click **More info → Run anyway**.
+- **Linux** — `tar xzf YADM-<version>-linux-x64.tar.gz` and run `YADM-linux/yadm`. If the
+  bundled `aria2c` is missing, install `aria2` from your package manager.
+
 ## Build and run
 
 ### macOS

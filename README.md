@@ -14,13 +14,13 @@ and dark.
 - **Queue control**: a configurable number of simultaneous downloads (default 1); the rest wait in the
   queue and can be reordered.
 - **Organised automatically**: downloads are grouped by category (video, audio, documents, archives,
-  software, images, torrents), with optional per-category folders.
+  software, images, torrents), with per-category folders (on by default).
 - **Browser integration**: an MV3 extension for Chrome, Edge and Firefox hands downloads to YADM with cookies,
   referrer and user agent.
 - **Clipboard monitor**: offers to download links to files and magnets you copy.
 - **Scheduler**: limit speed or pause everything at certain times.
 - **Bandwidth limits** and seeding ratio for torrents.
-- **Menu bar / system tray icon** with live speed and quick controls (macOS, Windows).
+- **Menu bar / system tray icon** with live speed and quick controls.
 - **Keyboard first**: almost everything has a shortcut, plus a fuzzy command palette.
 - **Interface size**: follows the system (including GNOME's text scaling on Linux) or 90–150%.
 
@@ -30,7 +30,7 @@ and dark.
 | --- | --- | --- | --- |
 | App | ✓ | ✓ | ✓ |
 | Bundled aria2 | `YADM.app` | next to `YADM.exe` | next to `yadm` |
-| Tray icon / close to tray | menu bar | system tray | — (closing quits) |
+| Tray icon / close to tray | menu bar | system tray | system tray (StatusNotifierItem) |
 | Shortcut modifier | ⌘ | Ctrl | Ctrl |
 | Data folder | `~/Library/Application Support/YADM` | `%APPDATA%\YADM` | `~/.local/share/YADM` |
 
@@ -83,8 +83,10 @@ dist/YADM-linux/yadm
 docker rmi yadm-build       # drop the build image when done
 ```
 
-Linux has no tray icon (the tray library needs a GTK event loop that GPUI doesn't run), so closing the
-window quits.
+The tray icon uses the StatusNotifierItem D-Bus protocol, which KDE, Xfce and Cinnamon show natively and GNOME
+shows with the AppIndicator extension (on by default in Ubuntu). Without a tray host, closing the window quits.
+On first launch YADM registers `~/.local/share/applications/dev.yadm.app.desktop` and its icon so the desktop
+shows its name and icon.
 
 ### Engine discovery
 

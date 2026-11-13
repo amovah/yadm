@@ -199,13 +199,7 @@ impl Render for AddDownload {
         let magnets = links.iter().filter(|l| l.starts_with("magnet:")).count();
         let single = links.len() == 1 && self.torrent.is_none() && magnets == 0;
         let settings = AppStore::global(cx).read(cx).settings().clone();
-        let dir_label = self
-            .dir
-            .clone()
-            .unwrap_or_else(|| settings.download_dir.clone())
-            .display()
-            .to_string()
-            .replace(&std::env::var("HOME").unwrap_or_default(), "~");
+        let dir_label = crate::platform::tilde_path(self.dir.as_ref().unwrap_or(&settings.download_dir));
         let category_label = self.category.map(|c| c.label()).unwrap_or("Auto");
         let summary = match (links.len(), magnets, &self.torrent) {
             (0, _, None) => None,

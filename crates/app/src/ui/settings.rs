@@ -504,15 +504,7 @@ impl SettingsView {
         let wide = |e: &Entity<InputState>| div().w(dp(260.)).child(Input::new(e).small());
         match section {
             Section::General => {
-                let mut dir = s.download_dir.display().to_string();
-                // Shorten the home folder to `~` (USERPROFILE on Windows). An unset
-                // variable must not be replaced: "".replace would hit every char.
-                if let Ok(home) = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-                    && !home.is_empty()
-                    && dir.starts_with(&home)
-                {
-                    dir = format!("~{}", &dir[home.len()..]);
-                }
+                let dir = crate::platform::tilde_path(&s.download_dir);
                 let mut rows = vec![
                     Self::row(
                         "Download folder",

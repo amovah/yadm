@@ -1,7 +1,7 @@
 //! Per-OS differences: shortcut modifiers and labels, file manager naming,
 //! bundled resource locations.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const IS_MAC: bool = cfg!(target_os = "macos");
 
@@ -147,6 +147,22 @@ pub fn extension_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extension")
 }
 
+/// Formats `path` for display with the home folder shortened to `~`
+/// (`USERPROFILE` on Windows, `HOME` elsewhere). Left as-is when the home
+/// variable is unset or the path lies outside it.
+pub fn tilde_path(path: &Path) -> String {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    tilde_with(path, home.as_deref().map(Path::new))
+}
+
+fn tilde_with(path: &Path, home: Option<&Path>) -> String {
+    match home.filter(|h| !h.as_os_str().is_empty()).and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".into(),
+        Some(rest) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,5 +179,16 @@ mod tests {
             assert_eq!(keys("cmd-shift-o"), "ctrl-shift-o");
             assert_eq!(keys("j"), "j");
         }
+    }
+
+    #[test]
+    fn tilde() {
+        let sep = std::path::MAIN_SEPARATOR;
+        let home = Path::new("/home/al");
+        assert_eq!(tilde_with(Path::new("/home/al/Downloads"), Some(home)), format!("~{sep}Downloads"));
+        assert_eq!(tilde_with(Path::new("/home/al"), Some(home)), "~");
+        assert_eq!(tilde_with(Path::new("/home/alice/x"), Some(home)), "/home/alice/x");
+        assert_eq!(tilde_with(Path::new("/data/x"), Some(Path::new(""))), "/data/x");
+        assert_eq!(tilde_with(Path::new("/data/x"), None), "/data/x");
     }
 }

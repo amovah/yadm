@@ -156,7 +156,9 @@ pub fn property(label: impl Into<SharedString>, value: impl IntoElement, cx: &Ap
                 .text_color(cx.theme().muted_foreground)
                 .child(label.into()),
         )
-        .child(div().flex_1().min_w_0().pt(dp(4.)).text_sm().child(value))
+        // A column that keeps children at their own width, so buttons hug their
+        // label and line up with plain-text values instead of stretching.
+        .child(div().flex_1().min_w_0().flex().flex_col().items_start().pt(dp(4.)).text_sm().child(value))
 }
 
 /// Empty strip at the top of a sidebar that clears the macOS traffic lights

@@ -218,7 +218,7 @@ impl AppView {
                     gpui_kit::component::button::Button::new("reveal").label(crate::platform::REVEAL).on_click(move |_, _, cx| {
                         let store = AppStore::global(cx);
                         if let Some(p) = store.read(cx).download(&id).and_then(|d| d.local_path()) {
-                            cx.reveal_path(&p);
+                            crate::platform::reveal(cx, &p);
                         }
                     })
                 });
@@ -520,9 +520,10 @@ impl AppView {
             .on_action(cx.listener(|this, _: &RemoveSelected, window, cx| this.confirm_remove(this.targets(), false, window, cx)))
             .on_action(cx.listener(|this, _: &RemoveSelectedWithFiles, window, cx| this.confirm_remove(this.targets(), true, window, cx)))
             .on_action(cx.listener(|this, _: &RevealSelected, _, cx| {
-                this.with_cursor_download(cx, |d| {
-                    let p = d.local_path().unwrap_or_else(|| d.dir.clone().into());
-                    cx.reveal_path(&p);
+                this.with_cursor_download(cx, |d| match d.local_path() {
+                    Some(p) => crate::platform::reveal(cx, &p),
+                    // No file yet (e.g. a video still downloading): open its folder.
+                    None => crate::platform::open(cx, std::path::Path::new(&d.dir)),
                 });
             }))
             .on_action(cx.listener(|this, _: &OpenSelected, _, cx| {
@@ -530,7 +531,7 @@ impl AppView {
                     if d.state == State::Completed
                         && let Some(p) = d.local_path()
                     {
-                        cx.open_with_system(&p);
+                        crate::platform::open(cx, &p);
                     }
                 });
             }))
@@ -601,7 +602,7 @@ impl AppView {
             .on_action(cx.listener(|this, _: &ClearFinished, _, cx| this.store.read(cx).send(Command::ClearFinished)))
             .on_action(cx.listener(|this, _: &OpenDownloadsFolder, _, cx| {
                 let dir = this.store.read(cx).settings().download_dir.clone();
-                cx.open_with_system(&dir);
+                crate::platform::open(cx, std::path::Path::new(&dir));
             }))
             .on_action(cx.listener(|this, _: &CycleTheme, _, cx| {
                 this.store.update(cx, |store, cx| {

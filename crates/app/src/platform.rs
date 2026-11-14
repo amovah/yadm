@@ -80,6 +80,33 @@ pub const REVEAL: &str = if cfg!(target_os = "macos") {
     "Show in Files"
 };
 
+/// Native separators. aria2 joins paths with `/` on Windows too, and the
+/// shell APIs behind reveal/open don't accept those.
+pub fn native_path(path: &Path) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(path.to_string_lossy().replace('/', "\\"))
+    } else {
+        path.to_path_buf()
+    }
+}
+
+/// Shows `path` selected in the file manager. If it's gone (moved, deleted,
+/// or still a `.part` file under another name), opens the nearest folder that
+/// exists instead of silently doing nothing.
+pub fn reveal(cx: &gpui_kit::App, path: &Path) {
+    let path = native_path(path);
+    if path.exists() {
+        cx.reveal_path(&path);
+    } else if let Some(dir) = path.ancestors().skip(1).find(|d| d.is_dir()) {
+        cx.open_with_system(dir);
+    }
+}
+
+/// Opens a file or folder with its default app.
+pub fn open(cx: &gpui_kit::App, path: &Path) {
+    cx.open_with_system(&native_path(path));
+}
+
 /// The system trash, as users know it.
 pub const TRASH: &str = if cfg!(windows) { "Recycle Bin" } else { "Trash" };
 

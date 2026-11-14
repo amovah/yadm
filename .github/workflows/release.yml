@@ -33,8 +33,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: scripts/build-linux.sh
-      - name: Check bundled aria2c
-        run: test -x dist/YADM-linux/aria2c
+      - name: Check bundled tools
+        run: for t in aria2c yt-dlp deno ffmpeg ffprobe; do test -x "dist/YADM-linux/$t"; done
       - name: Pack
         run: tar -C dist -czf "dist/YADM-${{ needs.version.outputs.version }}-linux-x64.tar.gz" YADM-linux
       - uses: actions/upload-artifact@v7
@@ -60,7 +60,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build aria2c
         run: ARCHS="$(uname -m)" scripts/build-aria2.sh
+      - name: Fetch yt-dlp and Deno
+        run: ARCHS="$(uname -m)" scripts/fetch-tools.sh
+      - name: Build ffmpeg
+        run: ARCHS="$(uname -m)" scripts/build-ffmpeg.sh
       - run: scripts/bundle-macos.sh
+      - name: Check bundled tools
+        run: for t in aria2c yt-dlp deno ffmpeg ffprobe; do test -x "dist/YADM.app/Contents/MacOS/$t"; done
       - name: Pack
         run: ditto -c -k --keepParent dist/YADM.app "dist/YADM-${{ needs.version.outputs.version }}-macos-${{ matrix.arch }}.zip"
       - uses: actions/upload-artifact@v7
@@ -81,6 +87,8 @@ jobs:
       - run: powershell -ExecutionPolicy Bypass -File scripts\bundle-windows.ps1
       - name: Check installer
         run: if (-not (Test-Path "dist\YADM-${{ needs.version.outputs.version }}-windows-x64-setup.exe")) { throw "installer was not built" }
+      - name: Check bundled tools
+        run: foreach ($t in "aria2c", "yt-dlp", "deno", "ffmpeg", "ffprobe") { if (-not (Test-Path "dist\YADM\$t.exe")) { throw "$t.exe was not bundled" } }
       - uses: actions/upload-artifact@v7
         with:
           path: dist/YADM-${{ needs.version.outputs.version }}-windows-x64.zip

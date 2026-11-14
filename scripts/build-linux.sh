@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Builds YADM for Linux inside Docker, so no -dev packages touch the host.
-# Output: dist/YADM-linux/{yadm,extension/,aria2c*}
+# Output: dist/YADM-linux/{yadm,extension/,licenses/,aria2c*,yt-dlp,deno,ffmpeg,ffprobe}
 #   * aria2c is copied from the build image only if all its libraries exist
 #     on this machine; otherwise install aria2 (apt install aria2).
+#   * yt-dlp and Deno are the official release binaries (scripts/fetch-tools.sh);
+#     ffmpeg/ffprobe are a minimal build made in the image (scripts/build-ffmpeg.sh).
+#     Both are cached in vendor/linux/.
 #
 #   scripts/build-linux.sh            # release build
 #   PROFILE=dev scripts/build-linux.sh
@@ -34,6 +37,22 @@ rm -rf "$DIST"
 mkdir -p "$DIST"
 cp "$TARGET/$OUT_DIR/yadm" "$DIST/yadm"
 cp -R extension "$DIST/extension"
+cp -R licenses "$DIST/licenses"
+
+# Video tools, next to the binary like aria2c.
+VENDOR="$ROOT/vendor/linux"
+[ -x "$VENDOR/yt-dlp" ] && [ -x "$VENDOR/deno" ] || scripts/fetch-tools.sh
+if ! [ -x "$VENDOR/ffmpeg" ] || ! [ -x "$VENDOR/ffprobe" ]; then
+  docker run --rm \
+    -u "$(id -u):$(id -g)" \
+    -e HOME=/tmp \
+    -e WORK=/src/target/docker/ffmpeg-build \
+    -v "$ROOT":/src -w /src \
+    "$IMAGE" scripts/build-ffmpeg.sh
+fi
+for tool in yt-dlp deno ffmpeg ffprobe; do
+  cp "$VENDOR/$tool" "$DIST/$tool"
+done
 
 # Bundle the engine next to the binary (YADM looks there first) when it runs here.
 docker run --rm -v "$DIST":/out "$IMAGE" sh -c "cp /opt/aria2c /out/ && chown $(id -u):$(id -g) /out/aria2c"

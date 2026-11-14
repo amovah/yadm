@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
-# Assembles dist/YADM.app with the bundled aria2c sidecar and browser extension.
-# Run scripts/build-aria2.sh first (or set ARIA2C=/path/to/aria2c).
+# Assembles dist/YADM.app with the bundled aria2c sidecar, the video tools
+# (yt-dlp, Deno, ffmpeg, ffprobe) and the browser extension.
+# Run scripts/build-aria2.sh, scripts/fetch-tools.sh and scripts/build-ffmpeg.sh
+# first (with the same ARCHS), or point ARIA2C/VIDEO_TOOLS elsewhere.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 ARIA2C="${ARIA2C:-$ROOT/vendor/aria2c}"
 [ -x "$ARIA2C" ] || { echo "aria2c not found at $ARIA2C — run scripts/build-aria2.sh" >&2; exit 1; }
+VIDEO_TOOLS="${VIDEO_TOOLS:-$ROOT/vendor}"
+for tool in yt-dlp deno ffmpeg ffprobe; do
+  [ -x "$VIDEO_TOOLS/$tool" ] || {
+    echo "$tool not found in $VIDEO_TOOLS — run scripts/fetch-tools.sh and scripts/build-ffmpeg.sh" >&2
+    exit 1
+  }
+done
 
 VERSION="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
 cargo build --release -p yadm-app
@@ -16,7 +25,11 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp target/release/yadm "$APP/Contents/MacOS/YADM"
 cp "$ARIA2C" "$APP/Contents/MacOS/aria2c"
+for tool in yt-dlp deno ffmpeg ffprobe; do
+  cp "$VIDEO_TOOLS/$tool" "$APP/Contents/MacOS/$tool"
+done
 cp -R extension "$APP/Contents/Resources/extension"
+cp -R licenses "$APP/Contents/Resources/licenses"
 
 # App icon (assets/icon.svg, rasterized to assets/icon.png).
 ICONSET="$(mktemp -d)/YADM.iconset"

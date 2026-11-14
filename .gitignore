@@ -2,4 +2,9 @@
 /dist
 /vendor/aria2c
 /vendor/aria2c.exe
+/vendor/yt-dlp*
+/vendor/deno*
+/vendor/ffmpeg*
+/vendor/ffprobe*
+/vendor/linux
 .DS_Store

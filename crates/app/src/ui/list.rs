@@ -360,6 +360,10 @@ impl AppView {
         Some(
             div().absolute().bottom_4().left_0().right_0().flex().justify_center().child(
                 h_flex()
+                    .id("bulk-bar")
+                    // Keep presses from reaching the row underneath, whose
+                    // mouse-down clears the selection (and so this bar).
+                    .occlude()
                     .gap_1()
                     .p_1()
                     .pl_3()

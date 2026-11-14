@@ -252,6 +252,9 @@ impl AppView {
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(RevealSelected), cx)),
                 cx,
             ))
+            .when_some(d.uris.first().cloned(), |this, u| {
+                this.child(property("Source", div().w_full().min_w_0().text_xs().text_color(theme.muted_foreground).child(u), cx))
+            })
             .child(property("Added", ts(d.added_at), cx))
             .when_some(d.finished_at, |this, f| this.child(property("Finished", ts(f), cx)))
             .when_some(d.error.clone(), |this, e| {

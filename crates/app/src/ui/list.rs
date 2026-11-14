@@ -18,6 +18,36 @@ use yadm_core::{Command, Download, State, format};
 
 gpui_kit::actions!(yadm_list, [GroupByStatus, GroupByCategory, GroupByNone]);
 
+/// Which optional row columns fit. The fixed columns need ~700 dp, more than
+/// the list gets in a small window with the detail panel open, so the least
+/// useful ones drop out first instead of squeezing the name.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Fit {
+    /// Name, size and speed/status only.
+    Narrow,
+    /// Also the progress bar and percentage.
+    Medium,
+    /// Everything: category chip and added time too.
+    Wide,
+}
+
+impl Fit {
+    /// Sidebar, detail panel and the content panel's inset/borders.
+    fn for_window(window: &Window, detail_open: bool) -> Self {
+        let mut w = window.viewport_size().width - dp(248. + 12.);
+        if detail_open {
+            w -= dp(400.);
+        }
+        if w >= dp(920.) {
+            Fit::Wide
+        } else if w >= dp(720.) {
+            Fit::Medium
+        } else {
+            Fit::Narrow
+        }
+    }
+}
+
 impl AppView {
     fn render_header_row(&self, key: GroupKey, count: usize, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
@@ -56,7 +86,7 @@ impl AppView {
             .into_any_element()
     }
 
-    fn render_item_row(&self, d: &Download, cx: &mut Context<Self>) -> AnyElement {
+    fn render_item_row(&self, d: &Download, fit: Fit, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let theme = cx.theme().clone();
         let selected = self.selected.contains(&d.id);
@@ -82,14 +112,13 @@ impl AppView {
             State::Completed => d.finished_at.map(|f| format::relative(f, now)).unwrap_or_default().into(),
             State::Removed => "".into(),
         };
-        let quality = d.video.as_ref().map(|v| v.quality_label.clone()).filter(|q| !q.is_empty());
-        let subtitle = match (&d.error, d.host()) {
-            (Some(e), _) if d.state == State::Failed => e.clone(),
-            (_, Some(h)) if quality.is_some() => format!("{h} · {}", quality.unwrap_or_default()),
-            (_, Some(h)) => h,
+        // Only failures get a subtitle; the source lives in the detail panel.
+        let subtitle = match &d.error {
+            Some(e) if d.state == State::Failed => e.clone(),
             _ => String::new(),
         };
         let show_bar = matches!(d.state, State::Active | State::Paused | State::Queued) && d.total > 0;
+        let size_w = if fit == Fit::Wide { 150. } else { 110. };
 
         h_flex()
             .id(ElementId::Name(format!("row-{}", d.id).into()))
@@ -119,22 +148,24 @@ impl AppView {
                     .min_w_0()
                     .gap_2()
                     .child(div().truncate().flex_shrink(1.).min_w(dp(40.)).child(d.name.clone()))
-                    .child(
+                    // The subtitle gives way first, and goes when there's barely room for the name.
+                    .when(fit > Fit::Narrow, |this| this.child(
                         div()
-                            .flex_shrink(1.)
+                            .flex_shrink(100.)
+                            .min_w_0()
                             .truncate()
                             .text_xs()
                             .text_color(if d.state == State::Failed { p.red } else { theme.muted_foreground })
                             .child(subtitle),
-                    ),
+                    )),
             )
-            .child(
+            .when(fit >= Fit::Medium, |this| this.child(
                 div()
                     .w(dp(96.))
                     .flex_shrink_0()
                     .when(show_bar, |this| this.child(progress_bar(d.progress(), state_color(d.state, &p, cx), cx))),
-            )
-            .child(
+            ))
+            .when(fit >= Fit::Medium, |this| this.child(
                 div()
                     .w(dp(48.))
                     .flex_shrink_0()
@@ -142,11 +173,11 @@ impl AppView {
                     .text_xs()
                     .text_color(theme.muted_foreground)
                     .when(show_bar, |this| this.child(format!("{:.0}%", d.progress() * 100.))),
-            )
-            .child(div().w(dp(150.)).flex_shrink_0().text_right().text_xs().text_color(theme.muted_foreground).child(size))
+            ))
+            .child(div().w(dp(size_w)).flex_shrink_0().text_right().text_xs().text_color(theme.muted_foreground).child(size))
             .child(div().w(dp(130.)).flex_shrink_0().text_right().text_xs().text_color(theme.muted_foreground).child(speed_or_status))
-            .child(div().w(dp(96.)).flex_shrink_0().flex().justify_end().child(chip(d.category.label(), Some(category_icon(d.category)), cx)))
-            .child(
+            .when(fit == Fit::Wide, |this| this.child(div().w(dp(96.)).flex_shrink_0().flex().justify_end().child(chip(d.category.label(), Some(category_icon(d.category)), cx))))
+            .when(fit == Fit::Wide, |this| this.child(
                 div()
                     .w(dp(36.))
                     .flex_shrink_0()
@@ -154,7 +185,7 @@ impl AppView {
                     .text_xs()
                     .text_color(theme.muted_foreground)
                     .child(format::relative(d.added_at, now)),
-            )
+            ))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
@@ -228,12 +259,13 @@ impl AppView {
             .into_any_element()
     }
 
-    fn render_rows(&mut self, range: Range<usize>, _window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn render_rows(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let snap = self.store.read(cx).snapshot().clone();
+        let fit = Fit::for_window(window, self.detail_open);
         range
             .filter_map(|i| match self.rows.get(i)? {
                 Row::Header { key, count } => Some(self.render_header_row(*key, *count, cx)),
-                Row::Item(idx) => snap.downloads.get(*idx).map(|d| self.render_item_row(d, cx)),
+                Row::Item(idx) => snap.downloads.get(*idx).map(|d| self.render_item_row(d, fit, cx)),
             })
             .collect()
     }

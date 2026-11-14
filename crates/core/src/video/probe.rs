@@ -108,6 +108,11 @@ pub(crate) fn error_message(stderr: &str) -> String {
         .copied()
         .unwrap_or("yt-dlp failed");
     let msg = line.strip_prefix("ERROR:").unwrap_or(line).trim();
+    // yt-dlp's advice is CLI flags; point at the setting that passes them.
+    if msg.contains("--cookies") || msg.contains("Sign in to confirm") {
+        return "The site wants you signed in. Choose your browser in Settings → Video → Cookies from browser, then retry"
+            .to_string();
+    }
     // Drop the "[youtube] abc123: " extractor prefix.
     match msg.strip_prefix('[').and_then(|r| r.split_once("] ")) {
         Some((_, rest)) => rest.split_once(": ").map_or(rest, |(_, m)| m).to_string(),
@@ -262,5 +267,7 @@ mod tests {
         );
         assert_eq!(error_message("ERROR: Unsupported URL: https://x"), "Unsupported URL: https://x");
         assert_eq!(error_message(""), "yt-dlp failed");
+        assert!(error_message("ERROR: [youtube] x: Sign in to confirm you’re not a bot. Use --cookies-from-browser")
+            .starts_with("The site wants you signed in"));
     }
 }

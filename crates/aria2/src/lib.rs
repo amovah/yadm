@@ -6,5 +6,7 @@ mod sidecar;
 pub mod types;
 
 pub use client::{Client, Error, Notification, NotificationKind};
-pub use sidecar::{Sidecar, SidecarConfig, find_aria2c};
+pub use sidecar::{
+    Sidecar, SidecarConfig, exe_name, find_aria2c, find_binary, no_window, no_window_std,
+};
 pub use types::*;

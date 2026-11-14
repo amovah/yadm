@@ -33,26 +33,53 @@ pub struct Sidecar {
 /// and the usual package manager locations (GUI apps launched from Finder
 /// get a minimal `PATH`; Scoop/Chocolatey/winget shims may be missing too).
 pub fn find_aria2c() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("YADM_ARIA2C").map(PathBuf::from)
+    find_binary("aria2c", "YADM_ARIA2C", &[])
+}
+
+/// Looks for the executable `stem` (`.exe` is appended on Windows): `$env_var`,
+/// next to the running executable, `extra` (in order), then `PATH` and the
+/// usual package manager locations.
+pub fn find_binary(stem: &str, env_var: &str, extra: &[PathBuf]) -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os(env_var).map(PathBuf::from)
         && p.is_file()
     {
         return Some(p);
     }
+    let name = exe_name(stem);
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
-        let p = dir.join(exe_name());
+        let p = dir.join(&name);
         if p.is_file() {
             return Some(p);
         }
     }
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).collect())
-        .unwrap_or_default();
+    let mut dirs: Vec<PathBuf> = extra.to_vec();
+    if let Some(path) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&path));
+    }
     dirs.extend(extra_dirs());
-    dirs.into_iter()
-        .map(|d| d.join(exe_name()))
-        .find(|p| p.is_file())
+    dirs.into_iter().map(|d| d.join(&name)).find(|p| p.is_file())
+}
+
+/// Keeps a console child of a GUI process from flashing a console window
+/// on Windows; a no-op elsewhere.
+pub fn no_window(cmd: &mut Command) {
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    #[cfg(not(windows))]
+    let _ = cmd;
+}
+
+/// Blocking-`std` variant of [`no_window`].
+pub fn no_window_std(cmd: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    #[cfg(not(windows))]
+    let _ = cmd;
 }
 
 fn extra_dirs() -> Vec<PathBuf> {
@@ -71,11 +98,12 @@ fn extra_dirs() -> Vec<PathBuf> {
     }
 }
 
-fn exe_name() -> &'static str {
+/// `stem` plus `.exe` on Windows.
+pub fn exe_name(stem: &str) -> String {
     if cfg!(windows) {
-        "aria2c.exe"
+        format!("{stem}.exe")
     } else {
-        "aria2c"
+        stem.to_string()
     }
 }
 
@@ -139,8 +167,7 @@ impl Sidecar {
         let mut cmd = Command::new(&binary);
         // aria2c is a console program: without this a GUI parent on Windows
         // flashes up a console window for it.
-        #[cfg(windows)]
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        no_window(&mut cmd);
         let child = cmd
             .args(&args)
             .stdin(Stdio::null())

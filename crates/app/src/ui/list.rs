@@ -70,6 +70,7 @@ impl AppView {
             (_, t) => format!("{} / {}", format::bytes(d.completed), format::bytes(t)),
         };
         let speed_or_status: SharedString = match d.state {
+            State::Active if d.note.is_some() => format!("{}…", d.note.as_deref().unwrap_or_default()).into(),
             State::Active => d
                 .eta_secs()
                 .map(|e| format!("{} · {}", format::speed(d.dl_speed), format::duration(e)))
@@ -81,8 +82,10 @@ impl AppView {
             State::Completed => d.finished_at.map(|f| format::relative(f, now)).unwrap_or_default().into(),
             State::Removed => "".into(),
         };
+        let quality = d.video.as_ref().map(|v| v.quality_label.clone()).filter(|q| !q.is_empty());
         let subtitle = match (&d.error, d.host()) {
             (Some(e), _) if d.state == State::Failed => e.clone(),
+            (_, Some(h)) if quality.is_some() => format!("{h} · {}", quality.unwrap_or_default()),
             (_, Some(h)) => h,
             _ => String::new(),
         };

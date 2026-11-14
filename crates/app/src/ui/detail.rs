@@ -195,16 +195,23 @@ impl AppView {
                     cx,
                 ))
                     .child(property("Time left", d.eta_secs().map(format::duration).unwrap_or_else(|| "—".into()), cx))
-                    .child(property(
+                    .when(d.kind != DownloadKind::Video, |this| this.child(property(
                         if matches!(d.kind, DownloadKind::Torrent | DownloadKind::Magnet) { "Peers" } else { "Connections" },
                         match d.seeders {
                             Some(s) => format!("{} ({} seeders)", d.connections, s),
                             None => d.connections.to_string(),
                         },
                         cx,
-                    ))
+                    )))
             })
             .child(property("Size", if d.total > 0 { format::bytes(d.total) } else { "Unknown".into() }, cx))
+            .when_some(d.video.as_ref().filter(|v| !v.quality_label.is_empty()), |this, v| {
+                let q = match &d.note {
+                    Some(n) if d.state == State::Active => format!("{} · {n}…", v.quality_label),
+                    _ => v.quality_label.clone(),
+                };
+                this.child(property("Quality", q, cx))
+            })
             .when(d.uploaded > 0, |this| this.child(property("Uploaded", format::bytes(d.uploaded), cx)))
             .child(property(
                 "Category",

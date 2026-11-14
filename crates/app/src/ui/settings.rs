@@ -10,7 +10,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, Textar
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme as _, Icon, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use crate::ui::kit::dp;
@@ -27,6 +27,33 @@ pub struct SetRuleAction {
     pub kind: String,
 }
 
+/// Picks a video option (`key` = quality | cookies).
+#[derive(Clone, PartialEq, Debug, serde::Deserialize, schemars::JsonSchema, Action)]
+#[action(namespace = yadm_settings)]
+pub struct SetVideoOption {
+    pub key: String,
+    pub value: Option<String>,
+}
+
+const QUALITIES: [(&str, &str); 6] = [
+    ("best", "Best available"),
+    ("2160", "Up to 4K"),
+    ("1080", "Up to 1080p"),
+    ("720", "Up to 720p"),
+    ("480", "Up to 480p"),
+    ("audio", "Audio only"),
+];
+
+const COOKIE_BROWSERS: [(&str, &str); 7] = [
+    ("chrome", "Chrome"),
+    ("firefox", "Firefox"),
+    ("safari", "Safari"),
+    ("edge", "Edge"),
+    ("brave", "Brave"),
+    ("chromium", "Chromium"),
+    ("opera", "Opera"),
+];
+
 /// Asks the owner to leave settings.
 pub enum SettingsEvent {
     Close,
@@ -41,6 +68,7 @@ pub enum Section {
     Schedule,
     Browser,
     Clipboard,
+    Video,
     Advanced,
 }
 
@@ -49,7 +77,7 @@ impl Section {
     const GROUPS: [(&'static str, &'static [Section]); 4] = [
         ("Preferences", &[Section::General, Section::Appearance]),
         ("Transfers", &[Section::Connections, Section::Bandwidth, Section::Schedule]),
-        ("Integrations", &[Section::Browser, Section::Clipboard]),
+        ("Integrations", &[Section::Browser, Section::Clipboard, Section::Video]),
         ("System", &[Section::Advanced]),
     ];
 
@@ -66,6 +94,7 @@ impl Section {
             Section::Schedule => "Schedule",
             Section::Browser => "Browser",
             Section::Clipboard => "Clipboard",
+            Section::Video => "Video",
             Section::Advanced => "Advanced",
         }
     }
@@ -85,6 +114,7 @@ impl Section {
             Section::Schedule => "Limit or pause downloads at certain times",
             Section::Browser => "Catch downloads from your browser",
             Section::Clipboard => "Pick up links you copy",
+            Section::Video => "Download from YouTube and other video sites with yt-dlp",
             Section::Advanced => "Engine options and files",
         }
     }
@@ -98,6 +128,7 @@ impl Section {
             Section::Schedule => Lucide::CalendarClock,
             Section::Browser => Lucide::Globe,
             Section::Clipboard => Lucide::Clipboard,
+            Section::Video => Lucide::Film,
             Section::Advanced => Lucide::SquareTerminal,
         }
     }
@@ -129,6 +160,12 @@ pub struct SettingsView {
     max_up: Entity<InputState>,
     seed_ratio: Entity<InputState>,
     port: Entity<InputState>,
+    ytdlp_path: Entity<InputState>,
+    ffmpeg_path: Entity<InputState>,
+    deno_path: Entity<InputState>,
+    video_max: Entity<InputState>,
+    /// Last seen video tools, to refresh their status when they change.
+    tools: yadm_core::video::Tools,
     aria2_options: Entity<TextareaState>,
     rules: Vec<RuleRow>,
     error: Option<String>,
@@ -167,6 +204,11 @@ impl SettingsView {
         let max_up = input(rate_text(s.max_upload_limit), "Unlimited", window, cx, &mut subs);
         let seed_ratio = input(format!("{:.1}", s.seed_ratio), "1.0", window, cx, &mut subs);
         let port = input(s.bridge.port.to_string(), "17863", window, cx, &mut subs);
+        let path_text = |p: &Option<std::path::PathBuf>| p.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+        let ytdlp_path = input(path_text(&s.video.ytdlp_path), "Automatic", window, cx, &mut subs);
+        let ffmpeg_path = input(path_text(&s.video.ffmpeg_path), "Automatic", window, cx, &mut subs);
+        let deno_path = input(path_text(&s.video.deno_path), "Automatic", window, cx, &mut subs);
+        let video_max = input(s.video.max_concurrent.to_string(), "2", window, cx, &mut subs);
         let raw: String = s.aria2_options.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
         let aria2_options = cx.new(|cx| TextareaState::new(window, cx).placeholder("key=value, one per line").default_value(raw));
         subs.push(cx.subscribe_in(&aria2_options, window, |this, _, ev, window, cx| {
@@ -177,6 +219,11 @@ impl SettingsView {
         // Settings can change elsewhere (sidebar speed menu, theme toggle):
         // pick those up so a later commit doesn't revert them.
         subs.push(cx.observe_in(&AppStore::global(cx), window, |this, store, window, cx| {
+            let tools = store.read(cx).snapshot().tools.clone();
+            if tools != this.tools {
+                this.tools = tools;
+                cx.notify();
+            }
             let new = store.read(cx).settings().clone();
             if new == this.draft {
                 return;
@@ -209,6 +256,11 @@ impl SettingsView {
             max_up,
             seed_ratio,
             port,
+            ytdlp_path,
+            ffmpeg_path,
+            deno_path,
+            video_max,
+            tools: AppStore::global(cx).read(cx).snapshot().tools.clone(),
             aria2_options,
             rules: vec![],
             error: None,
@@ -314,6 +366,23 @@ impl SettingsView {
         match Self::val(&self.port, cx).parse::<u16>() {
             Ok(v) if v >= 1024 => s.bridge.port = v,
             _ => errors.push("Port must be between 1024 and 65535".into()),
+        }
+        if let Some(v) = num(&self.video_max, "Video downloads at once", 1, 10, &mut errors) {
+            s.video.max_concurrent = v;
+        }
+        for (field, input, name) in [
+            (&mut s.video.ytdlp_path, &self.ytdlp_path, "yt-dlp"),
+            (&mut s.video.ffmpeg_path, &self.ffmpeg_path, "ffmpeg"),
+            (&mut s.video.deno_path, &self.deno_path, "Deno"),
+        ] {
+            let t = Self::val(input, cx);
+            if t.is_empty() {
+                *field = None;
+            } else if std::path::Path::new(&t).is_file() {
+                *field = Some(t.into());
+            } else {
+                errors.push(format!("No {name} program at “{t}”"));
+            }
         }
         s.user_agent = Self::val(&self.user_agent, cx);
         s.proxy = Self::val(&self.proxy, cx);
@@ -631,6 +700,76 @@ impl SettingsView {
                 self.switch("clipboard", s.clipboard_monitor, cx, |s, v| s.clipboard_monitor = v),
                 cx,
             )],
+            Section::Video => {
+                let tools = AppStore::global(cx).read(cx).snapshot().tools.clone();
+                let found = |p: &Option<std::path::PathBuf>, missing: &str| match p {
+                    Some(p) => format!("Using {}", crate::platform::tilde_path(p)),
+                    None => missing.to_string(),
+                };
+                let ytdlp_status = match (&tools.ytdlp, &tools.ytdlp_version) {
+                    (Some(p), Some(v)) => format!("{v} · {}", crate::platform::tilde_path(p)),
+                    (p, _) => found(p, "Not found: video downloads are unavailable"),
+                };
+                let ffmpeg_status = found(&tools.ffmpeg, "Not found: up to ~720p on YouTube and no MP3");
+                let deno_status = found(&tools.deno, "Not found: YouTube downloads may fail");
+                let quality = s.video.default_quality.clone();
+                let quality_label = QUALITIES.iter().find(|(k, _)| *k == quality).map_or("Up to 1080p", |(_, l)| *l);
+                let cookies = s.video.cookies_from_browser.clone();
+                let cookies_label = cookies
+                    .as_deref()
+                    .and_then(|c| COOKIE_BROWSERS.iter().find(|(k, _)| *k == c))
+                    .map_or("Don't use", |(_, l)| *l);
+                let has_ytdlp = tools.ytdlp.is_some();
+                vec![
+                    Self::row(
+                        "Default quality",
+                        Some("Preselected when you add a video; you can change it each time"),
+                        "resolution 1080p 4k youtube format",
+                        Button::new("video-quality").small().label(quality_label).dropdown_menu(move |menu, _, _| {
+                            QUALITIES.iter().fold(menu, |menu, (k, l)| {
+                                menu.menu_with_check(*l, quality == *k, Box::new(SetVideoOption { key: "quality".into(), value: Some((*k).into()) }))
+                            })
+                        }).pressable("video-quality"),
+                        cx,
+                    ),
+                    Self::row(
+                        "Use cookies from",
+                        Some("For videos that need you signed in, or are age-restricted"),
+                        "login account browser cookies age restricted members",
+                        Button::new("video-cookies").small().label(cookies_label).dropdown_menu(move |menu, _, _| {
+                            let menu = menu
+                                .menu_with_check("Don't use", cookies.is_none(), Box::new(SetVideoOption { key: "cookies".into(), value: None }))
+                                .separator();
+                            COOKIE_BROWSERS.iter().fold(menu, |menu, (k, l)| {
+                                menu.menu_with_check(*l, cookies.as_deref() == Some(*k), Box::new(SetVideoOption { key: "cookies".into(), value: Some((*k).into()) }))
+                            })
+                        }).pressable("video-cookies"),
+                        cx,
+                    ),
+                    Self::row("Video downloads at once", Some("Separate from regular downloads"), "parallel concurrent simultaneous", narrow(&self.video_max), cx),
+                    Self::row(
+                        "yt-dlp",
+                        Some(&ytdlp_status),
+                        "youtube downloader path program version",
+                        h_flex()
+                            .gap_1()
+                            .child(wide(&self.ytdlp_path))
+                            .child(
+                                Button::new("update-ytdlp")
+                                    .small()
+                                    .icon(Icon::new(Lucide::RefreshCw))
+                                    .label("Update")
+                                    .tooltip("Sites change often; update yt-dlp if downloads start failing")
+                                    .disabled(!has_ytdlp)
+                                    .on_click(|_, _, cx| AppStore::global(cx).read(cx).send(yadm_core::Command::UpdateYtdlp))
+                                    .pressable("update-ytdlp"),
+                            ),
+                        cx,
+                    ),
+                    Self::row("ffmpeg", Some(&ffmpeg_status), "merge convert mp3 path program", wide(&self.ffmpeg_path), cx),
+                    Self::row("Deno", Some(&deno_status), "javascript runtime youtube path program", wide(&self.deno_path), cx),
+                ]
+            }
             Section::Advanced => {
                 let data_dir = yadm_core::Paths::system().data_dir;
                 let log = yadm_core::Paths::system().engine_dir().join("aria2.log");
@@ -813,6 +952,13 @@ impl Render for SettingsView {
             .key_context("Settings")
             .track_focus(&self.focus)
             .size_full()
+            .on_action(cx.listener(|this, a: &SetVideoOption, window, cx| {
+                let a = a.clone();
+                this.edit(window, cx, |s| match a.key.as_str() {
+                    "quality" => s.video.default_quality = a.value.unwrap_or_else(|| "1080".into()),
+                    _ => s.video.cookies_from_browser = a.value,
+                });
+            }))
             .on_action(cx.listener(|this, a: &SetRuleAction, window, cx| {
                 let id = a.id.clone();
                 let kind = a.kind.clone();

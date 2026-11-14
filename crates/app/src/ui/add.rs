@@ -7,7 +7,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use crate::ui::kit::dp;
@@ -15,9 +15,42 @@ use super::kit::PressableExt as _;
 use crate::platform::{keys, shortcut};
 use std::cell::Cell;
 use std::path::PathBuf;
-use yadm_core::{AddRequest, Category, Command, format};
+use yadm_core::video::{self, QualityOption, Route, VideoInfo};
+use yadm_core::{AddRequest, Category, Command, VideoMeta, format};
 
 gpui_kit::actions!(yadm_add, [Submit]);
+
+/// Quality picked in the video card (index into the probed options).
+#[derive(Clone, PartialEq, Debug, serde::Deserialize, schemars::JsonSchema, Action)]
+#[action(namespace = yadm_add)]
+pub struct PickQuality {
+    pub index: usize,
+}
+
+/// yt-dlp lookup for the single pasted link.
+enum VideoState {
+    None,
+    Probing(String),
+    Ready {
+        url: String,
+        info: Box<VideoInfo>,
+        options: Vec<QualityOption>,
+        selected: usize,
+    },
+    Failed {
+        url: String,
+        error: String,
+    },
+}
+
+impl VideoState {
+    fn url(&self) -> Option<&str> {
+        match self {
+            VideoState::None => None,
+            VideoState::Probing(u) | VideoState::Ready { url: u, .. } | VideoState::Failed { url: u, .. } => Some(u),
+        }
+    }
+}
 
 /// Category choice in the dialog; `None` means auto-detect.
 #[derive(Clone, PartialEq, Debug, serde::Deserialize, schemars::JsonSchema, Action)]
@@ -37,6 +70,10 @@ pub struct AddDownload {
     /// Extra context carried from a browser request (headers, referer…).
     base: AddRequest,
     error: Option<String>,
+    video: VideoState,
+    /// Download the probed link with yt-dlp (the user can switch back to a plain file).
+    as_video: bool,
+    _probe: Option<Task<()>>,
     _subs: Vec<Subscription>,
 }
 
@@ -70,8 +107,9 @@ impl AddDownload {
         });
         let limit = cx.new(|cx| InputState::new(window, cx).placeholder("Unlimited (e.g. 500K, 2M)"));
         let subs = vec![
-            cx.observe(&urls, |this, _, cx| {
+            cx.observe_in(&urls, window, |this, _, window, cx| {
                 this.error = None;
+                this.links_changed(window, cx);
                 cx.notify();
             }),
             cx.subscribe_in(&filename, window, |this, _, ev, window, cx| {
@@ -90,8 +128,75 @@ impl AddDownload {
             start_paused: req.start_paused,
             base: req,
             error: None,
+            video: VideoState::None,
+            as_video: true,
+            _probe: None,
             _subs: subs,
         }
+        .with_initial_probe(window, cx)
+    }
+
+    fn with_initial_probe(mut self, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        self.links_changed(window, cx);
+        self
+    }
+
+    /// The link a video lookup applies to: exactly one, no torrent file.
+    fn single_link(&self, cx: &App) -> Option<String> {
+        let links = self.links(cx);
+        (links.len() == 1 && self.torrent.is_none()).then(|| links[0].clone())
+    }
+
+    /// Probes known video pages as soon as they're pasted.
+    fn links_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let link = self.single_link(cx);
+        if link.as_deref() == self.video.url() {
+            return;
+        }
+        self.video = VideoState::None;
+        self._probe = None;
+        if let Some(link) = link
+            && video::route(&link) == Route::Video
+        {
+            self.start_probe(link, window, cx);
+        }
+    }
+
+    fn start_probe(&mut self, url: String, window: &mut Window, cx: &mut Context<Self>) {
+        let store = AppStore::global(cx);
+        let tools = store.read(cx).snapshot().tools.clone();
+        let settings = store.read(cx).settings().clone();
+        if tools.ytdlp.is_none() {
+            self.video = VideoState::Failed { url, error: "yt-dlp wasn't found, so videos can't be downloaded. Set its location in Settings → Video.".into() };
+            return;
+        }
+        self.as_video = true;
+        self.video = VideoState::Probing(url.clone());
+        self._probe = Some(cx.spawn_in(window, async move |this, cx| {
+            let (u, t, v) = (url.clone(), tools.clone(), settings.video.clone());
+            let proxy = settings.proxy.clone();
+            let res = cx.background_spawn(async move { video::probe(&t, &v, &proxy, &u) }).await;
+            this.update(cx, |this, cx| {
+                if this.video.url() != Some(url.as_str()) {
+                    return;
+                }
+                this.video = match res {
+                    Ok(info) => {
+                        let options = video::quality_options(&info, tools.ffmpeg.is_some());
+                        let selected = video::default_option(&options, &settings.video.default_quality);
+                        if options.is_empty() {
+                            VideoState::Failed { url, error: "No downloadable formats were found".into() }
+                        } else {
+                            VideoState::Ready { url, info: Box::new(info), options, selected }
+                        }
+                    }
+                    Err(e) => VideoState::Failed { url, error: format!("{e:#}") },
+                };
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
     }
 
     fn links(&self, cx: &App) -> Vec<String> {
@@ -187,8 +292,168 @@ impl AddDownload {
             req.torrent = Some(bytes.clone());
             req.metalink = *metalink;
         }
+        let probed = self.single_link(cx).is_some_and(|l| Some(l.as_str()) == self.video.url());
+        if self.as_video
+            && probed
+            && let VideoState::Ready { info, options, selected, .. } = &self.video
+            && let Some(o) = options.get(*selected)
+        {
+            if req.filename.is_none() && !info.title.trim().is_empty() {
+                req.filename = Some(info.title.trim().to_string());
+            }
+            if req.category.is_none() {
+                req.category = Some(if o.audio_only { Category::Audio } else { Category::Video });
+            }
+            req.video = Some(VideoMeta {
+                selector: o.selector.clone(),
+                quality_label: o.label.clone(),
+                audio_format: o.audio_format.clone(),
+                est_size: o.est_size,
+                ..Default::default()
+            });
+        } else if probed && matches!(self.video, VideoState::Probing(_)) && self.as_video {
+            self.error = Some("Still looking up the video…".into());
+            cx.notify();
+            return;
+        }
         store.read(cx).send(Command::Add(req));
         window.close_dialog(cx);
+    }
+}
+
+impl AddDownload {
+    /// The video card under the links: lookup progress, the quality picker, or
+    /// an offer to look a page up.
+    fn render_video(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let theme = cx.theme().clone();
+        let link = self.single_link(cx)?;
+        let has_ffmpeg = AppStore::global(cx).read(cx).snapshot().tools.ffmpeg.is_some();
+        let card = v_flex()
+            .gap_2()
+            .px_3()
+            .py_2p5()
+            .rounded(dp(8.))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.muted.opacity(0.4));
+        let el = match &self.video {
+            VideoState::None => {
+                if video::route(&link) != Route::Probe {
+                    return None;
+                }
+                h_flex()
+                    .gap_2()
+                    .child(muted_text("Is this a page with a video on it?", cx))
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("fetch-video")
+                            .small()
+                            .ghost()
+                            .icon(Icon::new(Lucide::Film))
+                            .label("Fetch video")
+                            .on_click(cx.listener(move |this, _, window, cx| this.start_probe(link.clone(), window, cx)))
+                            .pressable("fetch-video"),
+                    )
+                    .into_any_element()
+            }
+            VideoState::Probing(_) => card
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(gpui_kit::component::spinner::Spinner::new().small())
+                        .child(div().text_sm().text_color(theme.muted_foreground).child("Looking up the video…")),
+                )
+                .into_any_element(),
+            VideoState::Failed { error, .. } => {
+                let retry = link.clone();
+                card.child(
+                    h_flex()
+                        .gap_2()
+                        .items_start()
+                        .child(Icon::new(Lucide::CircleAlert).small().text_color(theme.danger))
+                        .child(div().flex_1().text_sm().child(error.clone()))
+                        .child(
+                            Button::new("retry-video")
+                                .xsmall()
+                                .ghost()
+                                .icon(Icon::new(Lucide::RotateCw))
+                                .on_click(cx.listener(move |this, _, window, cx| this.start_probe(retry.clone(), window, cx)))
+                                .pressable("retry-video"),
+                        ),
+                )
+                .child(muted_text("It will be added as a regular file download.", cx))
+                .into_any_element()
+            }
+            VideoState::Ready { info, options, selected, .. } => {
+                let meta: Vec<String> = [
+                    info.uploader.clone(),
+                    info.duration.map(|d| format::duration(d as u64)),
+                    info.extractor_key.clone(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                let current = &options[*selected];
+                let label = match current.est_size {
+                    Some(n) => format!("{} · ~{}", current.label, format::bytes(n)),
+                    None => current.label.clone(),
+                };
+                let items: Vec<(String, bool)> = options
+                    .iter()
+                    .enumerate()
+                    .map(|(i, o)| {
+                        let l = match o.est_size {
+                            Some(n) => format!("{}  ·  ~{}", o.label, format::bytes(n)),
+                            None => o.label.clone(),
+                        };
+                        (l, i == *selected)
+                    })
+                    .collect();
+                let as_video = self.as_video;
+                card.child(
+                    h_flex()
+                        .gap_2()
+                        .child(Icon::new(Lucide::Film).small().text_color(theme.muted_foreground))
+                        .child(div().flex_1().min_w_0().truncate().text_sm().font_weight(FontWeight::MEDIUM).child(info.title.clone())),
+                )
+                .when(!meta.is_empty(), |this| this.child(muted_text(meta.join(" · "), cx)))
+                .child(
+                    h_flex()
+                        .gap_3()
+                        .child(div().w(dp(96.)).text_sm().text_color(theme.muted_foreground).child("Quality"))
+                        .child(
+                            Button::new("pick-quality")
+                                .small()
+                                .disabled(!as_video)
+                                .label(label)
+                                .dropdown_menu(move |menu, _, _| {
+                                    let mut menu = menu;
+                                    for (i, (l, checked)) in items.iter().enumerate() {
+                                        menu = menu.menu_with_check(l.clone(), *checked, Box::new(PickQuality { index: i }));
+                                    }
+                                    menu
+                                })
+                                .pressable("pick-quality"),
+                        )
+                        .child(div().flex_1())
+                        .child(
+                            Switch::new("as-video")
+                                .small()
+                                .label("Download as video")
+                                .checked(as_video)
+                                .on_change(cx.listener(|this, v: &bool, _, cx| {
+                                    this.as_video = *v;
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .when(!has_ffmpeg, |this| {
+                    this.child(muted_text("ffmpeg wasn't found: only single-file qualities (usually up to 720p) and no MP3.", cx))
+                })
+                .into_any_element()
+            }
+        };
+        Some(el)
     }
 }
 
@@ -227,7 +492,14 @@ impl Render for AddDownload {
                 this.category = a.category.as_deref().map(Category::parse);
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, a: &PickQuality, _, cx| {
+                if let VideoState::Ready { selected, options, .. } = &mut this.video {
+                    *selected = a.index.min(options.len().saturating_sub(1));
+                }
+                cx.notify();
+            }))
             .child(Textarea::new(&self.urls).h(dp(110.)))
+            .children(self.render_video(cx))
             .child(
                 h_flex()
                     .gap_2()

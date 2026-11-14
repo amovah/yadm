@@ -5,7 +5,7 @@ const EXTS: &[&str] = &[
     "appimage", "mp4", "mkv", "avi", "mov", "webm", "mp3", "flac", "wav", "m4a", "ogg", "pdf", "epub", "torrent", "bin", "jar",
 ];
 
-/// Links in `text` that look like downloads (known file extension or magnet).
+/// Links in `text` that look like downloads (known file extension, video page or magnet).
 pub fn download_links(text: &str) -> Vec<String> {
     let mut out = vec![];
     for token in text.split_whitespace() {
@@ -18,7 +18,9 @@ pub fn download_links(text: &str) -> Vec<String> {
             continue;
         }
         let path = t.split(['?', '#']).next().unwrap_or_default().to_ascii_lowercase();
-        if EXTS.iter().any(|e| path.ends_with(&format!(".{e}"))) {
+        if EXTS.iter().any(|e| path.ends_with(&format!(".{e}")))
+            || yadm_core::video::route(t) == yadm_core::video::Route::Video
+        {
             out.push(t.to_string());
         }
     }
@@ -62,6 +64,7 @@ mod tests {
         let t = "see https://x.org/a.zip?dl=1 and https://x.org/page and magnet:?xt=urn:btih:abc";
         assert_eq!(download_links(t), vec!["https://x.org/a.zip?dl=1", "magnet:?xt=urn:btih:abc"]);
         assert!(download_links("hello world").is_empty());
+        assert_eq!(download_links("https://youtu.be/abc"), vec!["https://youtu.be/abc"]);
         assert_eq!(short_name("https://x.org/dir/file.iso?x"), "file.iso");
         assert_eq!(candidate_links("go to https://x.org/get?id=3 now"), vec!["https://x.org/get?id=3"]);
         assert_eq!(candidate_links("https://x.org/page https://x.org/a.zip"), vec!["https://x.org/a.zip"]);

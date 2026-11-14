@@ -8966,7 +8966,7 @@ checksum = "7a5a4b21e1a62b67a2970e6831bc091d7b87e119e7f9791aef9702e3bef04448"
 
 [[package]]
 name = "yadm-app"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8984,7 +8984,7 @@ dependencies = [
 
 [[package]]
 name = "yadm-aria2"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -9001,7 +9001,7 @@ dependencies = [
 
 [[package]]
 name = "yadm-bridge"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -9016,7 +9016,7 @@ dependencies = [
 
 [[package]]
 name = "yadm-core"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-channel",

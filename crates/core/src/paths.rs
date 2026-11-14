@@ -32,4 +32,9 @@ impl Paths {
     pub fn engine_dir(&self) -> PathBuf {
         self.data_dir.join("engine")
     }
+
+    /// Updated copies of external tools (yt-dlp), preferred over bundled ones.
+    pub fn tools_dir(&self) -> PathBuf {
+        self.data_dir.join("tools")
+    }
 }

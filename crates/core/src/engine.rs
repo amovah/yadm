@@ -7,6 +7,8 @@ use crate::paths::Paths;
 use crate::schedule::{self, Effective};
 use crate::settings::{BridgeSettings, Settings};
 use crate::store::Store;
+use crate::video::job::{self, JobEvent, JobHandle, JobSpec};
+use crate::video::{self, Tools};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -153,7 +155,22 @@ struct Actor {
     /// Extension pairing requests waiting for the user's answer.
     pending_pairs: HashMap<u64, tokio::sync::oneshot::Sender<bool>>,
     next_pair: u64,
+
+    /// yt-dlp/ffmpeg/deno locations.
+    tools: Tools,
+    /// Running yt-dlp processes and their generation (stale events are ignored).
+    video_jobs: HashMap<DownloadId, (u64, JobHandle)>,
+    video_tx: async_channel::Sender<(VideoTag, JobEvent)>,
+    video_rx: async_channel::Receiver<(VideoTag, JobEvent)>,
+    next_job: u64,
+    /// Video downloads paused by the scheduler.
+    schedule_paused_video: HashSet<DownloadId>,
+    /// Results of a background `yt-dlp -U`.
+    update_tx: async_channel::Sender<Result<String, String>>,
+    update_rx: async_channel::Receiver<Result<String, String>>,
 }
+
+type VideoTag = (DownloadId, u64);
 
 enum Flow {
     Restart,
@@ -172,12 +189,18 @@ impl Actor {
             // Nothing is transferring until aria2 reports in.
             d.dl_speed = 0;
             d.ul_speed = 0;
+            // yt-dlp processes died with the app; requeue them to resume.
+            if d.kind == DownloadKind::Video && d.state == State::Active {
+                d.state = State::Queued;
+            }
         }
         let by_gid = downloads
             .iter()
             .filter_map(|d| Some((d.gid.clone()?, d.id.clone())))
             .collect();
         let (bridge_tx, bridge_rx) = async_channel::unbounded();
+        let (video_tx, video_rx) = async_channel::unbounded();
+        let (update_tx, update_rx) = async_channel::unbounded();
         Ok(Self {
             paths,
             settings,
@@ -199,6 +222,14 @@ impl Actor {
             bridge_rx,
             pending_pairs: HashMap::new(),
             next_pair: 0,
+            tools: Tools::default(),
+            video_jobs: HashMap::new(),
+            video_tx,
+            video_rx,
+            next_job: 0,
+            schedule_paused_video: HashSet::new(),
+            update_tx,
+            update_rx,
         })
     }
 
@@ -206,6 +237,9 @@ impl Actor {
 
     async fn run(mut self, cmds: async_channel::Receiver<Command>) {
         self.ensure_bridge().await;
+        self.publish().await;
+        self.refresh_tools().await;
+        self.pump_video();
         self.publish().await;
         let mut backoff = Duration::from_secs(1);
         loop {
@@ -254,14 +288,29 @@ impl Actor {
                         tokio::select! {
                             _ = &mut deadline => break,
                             cmd = cmds.recv() => match cmd {
-                                Ok(Command::Shutdown) | Err(_) => { self.flush(true); return; }
-                                Ok(cmd) => { self.handle(cmd).await; }
+                                Ok(Command::Shutdown) | Err(_) => {
+                                    self.stop_all_video();
+                                    self.flush(true);
+                                    return;
+                                }
+                                Ok(cmd) => {
+                                    self.handle(cmd).await;
+                                    self.publish().await;
+                                }
+                            },
+                            msg = self.video_rx.recv() => if let Ok(msg) = msg {
+                                self.on_video(msg).await;
+                                self.publish().await;
+                            },
+                            res = self.update_rx.recv() => if let Ok(res) = res {
+                                self.updated(res).await;
                             },
                         }
                     }
                 }
             }
         }
+        self.stop_all_video();
         self.flush(true);
     }
 
@@ -309,6 +358,12 @@ impl Actor {
                     }
                 }
                 _ = sched.tick() => self.apply_schedule(false).await,
+                msg = self.video_rx.recv() => if let Ok(msg) = msg {
+                    self.on_video(msg).await;
+                },
+                res = self.update_rx.recv() => if let Ok(res) = res {
+                    self.updated(res).await;
+                },
                 msg = self.bridge_rx.recv() => match msg {
                     Ok(BridgeMessage::Download(req)) => self.browser_request(req).await,
                     Ok(BridgeMessage::Pair { browser, reply }) => {
@@ -339,6 +394,7 @@ impl Actor {
         }
         let _ = tokio::time::timeout(Duration::from_secs(3), sidecar.wait()).await;
         sidecar.kill().await;
+        self.stop_all_video();
         self.flush(true);
         Flow::Shutdown
     }
@@ -361,6 +417,7 @@ impl Actor {
             global: self.global.clone(),
             engine: self.engine.clone(),
             schedule: self.schedule_label.clone(),
+            tools: self.tools.clone(),
         };
         self.emit(Event::Snapshot(Arc::new(snap))).await;
     }
@@ -434,6 +491,12 @@ impl Actor {
                 active: g.num_active,
                 waiting: g.num_waiting,
             };
+            for d in &self.downloads {
+                if d.kind == DownloadKind::Video && d.state == State::Active {
+                    self.global.dl_speed += d.dl_speed;
+                    self.global.active += 1;
+                }
+            }
         }
         let stopped = parse(res.pop().unwrap());
         let waiting = parse(res.pop().unwrap());
@@ -452,7 +515,7 @@ impl Actor {
 
         // Live records aria2 no longer knows about were lost (e.g. session not saved).
         for d in &mut self.downloads {
-            if d.state.is_live() && !seen.contains(&d.id) {
+            if d.kind != DownloadKind::Video && d.state.is_live() && !seen.contains(&d.id) {
                 d.state = State::Failed;
                 d.dl_speed = 0;
                 d.ul_speed = 0;
@@ -510,7 +573,8 @@ impl Actor {
                             .and_then(|f| f.uris.first())
                             .map(|u| u.uri.as_str());
                         self.downloads.iter().position(|d| {
-                            d.state.is_live()
+                            d.kind != DownloadKind::Video
+                                && d.state.is_live()
                                 && !seen.contains(&d.id)
                                 && d.gid
                                     .as_ref()
@@ -697,8 +761,17 @@ impl Actor {
 
     async fn handle_inner(&mut self, cmd: Command) -> anyhow::Result<()> {
         match cmd {
+            Command::Add(req) if req.video.is_some() => self.add_video(req)?,
             Command::Add(req) => self.add(req).await?,
             Command::Pause(ids) => {
+                let (videos, ids) = self.split_video(ids);
+                for id in videos {
+                    self.pause_video(&id);
+                }
+                self.pump_video();
+                if ids.is_empty() {
+                    return Ok(());
+                }
                 let c = self.client()?;
                 for id in ids {
                     if let Some(d) = self
@@ -712,6 +785,14 @@ impl Actor {
                 }
             }
             Command::Resume(ids) => {
+                let (videos, ids) = self.split_video(ids);
+                for id in videos {
+                    self.resume_video(&id);
+                }
+                self.pump_video();
+                if ids.is_empty() {
+                    return Ok(());
+                }
                 let c = self.client()?;
                 let mut retry = vec![];
                 for id in ids {
@@ -743,6 +824,16 @@ impl Actor {
                 }
             }
             Command::PauseAll => {
+                let videos: Vec<_> = self
+                    .downloads
+                    .iter()
+                    .filter(|d| d.kind == DownloadKind::Video)
+                    .map(|d| d.id.clone())
+                    .collect();
+                for id in videos {
+                    self.pause_video(&id);
+                }
+                self.schedule_paused_video.clear();
                 self.schedule_paused.clear();
                 self.client()?.pause_all().await?;
             }
@@ -751,6 +842,16 @@ impl Actor {
                     self.toast(ToastKind::Info, "Downloads are paused by your schedule")
                         .await;
                 } else {
+                    let videos: Vec<_> = self
+                        .downloads
+                        .iter()
+                        .filter(|d| d.kind == DownloadKind::Video && d.state == State::Paused)
+                        .map(|d| d.id.clone())
+                        .collect();
+                    for id in videos {
+                        self.resume_video(&id);
+                    }
+                    self.pump_video();
                     self.client()?.unpause_all().await?;
                 }
             }
@@ -811,6 +912,14 @@ impl Actor {
             }
             Command::RequestDetails(id) => self.details(&id).await?,
             Command::UpdateSettings(new) => self.update_settings(*new).await?,
+            Command::UpdateYtdlp => {
+                let (tools, paths, tx) = (self.tools.clone(), self.paths.clone(), self.update_tx.clone());
+                self.toast(ToastKind::Info, "Updating yt-dlp…").await;
+                tokio::task::spawn_blocking(move || {
+                    let res = video::update_ytdlp(&tools, &paths).map_err(|e| format!("{e:#}"));
+                    let _ = tx.send_blocking(res);
+                });
+            }
             Command::SetVisible(v) => self.visible = v,
             Command::AnswerPair { id, allow } => {
                 // The first answer wins; closing the dialog afterwards is a no-op.
@@ -930,6 +1039,11 @@ impl Actor {
     }
 
     async fn retry(&mut self, id: &str) -> anyhow::Result<()> {
+        if self.get(id).is_some_and(|d| d.kind == DownloadKind::Video) {
+            self.resume_video(id);
+            self.pump_video();
+            return Ok(());
+        }
         let c = self.client()?;
         let Some(i) = self.idx(id) else { return Ok(()) };
         let d = self.downloads[i].clone();
@@ -974,6 +1088,27 @@ impl Actor {
         let Some(d) = self.get(id).cloned() else {
             return;
         };
+        if d.kind == DownloadKind::Video {
+            if let Some((_, job)) = self.video_jobs.remove(id) {
+                job.stop();
+            }
+            self.forget(id);
+            if delete_files {
+                let paths = video_removable_paths(&d);
+                tokio::spawn(async move {
+                    // Give yt-dlp time to exit and close its files.
+                    tokio::time::sleep(Duration::from_millis(1500)).await;
+                    let existing: Vec<_> = paths.into_iter().filter(|p| p.exists()).collect();
+                    if !existing.is_empty()
+                        && let Err(e) = trash::delete_all(&existing)
+                    {
+                        tracing::warn!("could not move files to trash: {e}");
+                    }
+                });
+            }
+            self.pump_video();
+            return;
+        }
         if let (Some(c), Some(gid)) = (self.client.clone(), d.gid.clone()) {
             if d.state.is_live() {
                 let _ = c.force_remove(&gid).await;
@@ -1048,7 +1183,12 @@ impl Actor {
 
     async fn update_settings(&mut self, new: Settings) -> anyhow::Result<()> {
         new.save(&self.paths.settings())?;
+        let video_changed = new.video != self.settings.video;
         self.settings = new;
+        if video_changed {
+            self.refresh_tools().await;
+            self.pump_video();
+        }
         if let Some(c) = &self.client {
             let opts: Options = self
                 .settings
@@ -1092,6 +1232,16 @@ impl Actor {
                     self.schedule_paused.insert(g.clone());
                 }
             }
+            let videos: Vec<_> = self
+                .downloads
+                .iter()
+                .filter(|d| d.kind == DownloadKind::Video && matches!(d.state, State::Active | State::Queued))
+                .map(|d| d.id.clone())
+                .collect();
+            for id in videos {
+                self.pause_video(&id);
+                self.schedule_paused_video.insert(id);
+            }
             self.toast(
                 ToastKind::Info,
                 format!(
@@ -1104,11 +1254,227 @@ impl Actor {
             for g in std::mem::take(&mut self.schedule_paused) {
                 let _ = c.unpause(&g).await;
             }
+            for id in std::mem::take(&mut self.schedule_paused_video) {
+                self.resume_video(&id);
+            }
             self.toast(ToastKind::Info, "Schedule window ended; resuming downloads")
                 .await;
         }
         self.schedule_label = eff.label.clone();
         self.applied = eff;
+        self.pump_video();
+    }
+
+    // ---- video (yt-dlp) ---------------------------------------------------
+
+    async fn refresh_tools(&mut self) {
+        let (video, paths) = (self.settings.video.clone(), self.paths.clone());
+        if let Ok(tools) = tokio::task::spawn_blocking(move || Tools::resolve(&video, &paths)).await {
+            tracing::info!(?tools, "video tools");
+            self.tools = tools;
+        }
+    }
+
+    async fn updated(&mut self, res: Result<String, String>) {
+        self.refresh_tools().await;
+        match res {
+            Ok(msg) => self.toast(ToastKind::Success, msg).await,
+            Err(e) => self.toast(ToastKind::Error, e).await,
+        }
+        self.publish().await;
+    }
+
+    /// Splits ids into video downloads and aria2 ones.
+    fn split_video(&self, ids: Vec<DownloadId>) -> (Vec<DownloadId>, Vec<DownloadId>) {
+        ids.into_iter()
+            .partition(|id| self.get(id).is_some_and(|d| d.kind == DownloadKind::Video))
+    }
+
+    fn add_video(&mut self, req: AddRequest) -> anyhow::Result<()> {
+        let mut meta = req.video.clone().unwrap_or_default();
+        let Some(uri) = req.uris.iter().map(|u| u.trim()).find(|u| !u.is_empty()) else {
+            anyhow::bail!("Nothing to download");
+        };
+        let category = req.category.unwrap_or(Category::Video);
+        let dir = self.target_dir(category, req.dir.clone());
+        let filename = req.filename.as_deref().map(str::trim).filter(|f| !f.is_empty());
+        meta.filename = filename.map(safe_filename);
+        let d = Download {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: DownloadKind::Video,
+            name: filename.map_or_else(|| name_from_uri(uri), str::to_owned),
+            uris: vec![uri.to_string()],
+            dir: dir.display().to_string(),
+            state: if req.start_paused { State::Paused } else { State::Queued },
+            category,
+            added_at: now_ms(),
+            total: meta.est_size.unwrap_or(0),
+            speed_limit: req.speed_limit,
+            video: Some(meta),
+            ..Default::default()
+        };
+        self.store.upsert(&d)?;
+        self.downloads.insert(0, d);
+        self.pump_video();
+        Ok(())
+    }
+
+    /// Starts queued video downloads, oldest first, up to the concurrency limit.
+    fn pump_video(&mut self) {
+        if self.applied.paused {
+            return;
+        }
+        let max = self.settings.video.max_concurrent.max(1) as usize;
+        while self.video_jobs.len() < max {
+            let next = self
+                .downloads
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| {
+                    d.kind == DownloadKind::Video
+                        && d.state == State::Queued
+                        && !self.video_jobs.contains_key(&d.id)
+                })
+                .min_by_key(|(_, d)| d.added_at)
+                .map(|(i, _)| i);
+            let Some(i) = next else { break };
+            self.start_video(i);
+        }
+    }
+
+    fn start_video(&mut self, i: usize) {
+        let d = &self.downloads[i];
+        let meta = d.video.clone().unwrap_or_default();
+        let spec = JobSpec {
+            url: d.uris.first().cloned().unwrap_or_default(),
+            dir: PathBuf::from(&d.dir),
+            filename: meta.filename.clone(),
+            selector: if meta.selector.is_empty() {
+                "bv*+ba/b".into()
+            } else {
+                meta.selector.clone()
+            },
+            audio_format: meta.audio_format.clone(),
+            speed_limit: d.speed_limit,
+            est_size: meta.est_size,
+            common: video::args_for(&self.tools, &self.settings),
+        };
+        self.next_job += 1;
+        let tag = (d.id.clone(), self.next_job);
+        let res = job::spawn(&self.tools, &spec, tag.clone(), self.video_tx.clone());
+        let d = &mut self.downloads[i];
+        match res {
+            Ok(handle) => {
+                self.video_jobs.insert(tag.0, (tag.1, handle));
+                d.state = State::Active;
+                d.error = None;
+                d.note = None;
+            }
+            Err(e) => {
+                d.state = State::Failed;
+                d.error = Some(format!("{e:#}"));
+            }
+        }
+        self.dirty.insert(d.id.clone());
+    }
+
+    /// Stops a video download; call [`Self::pump_video`] afterwards to fill the slot.
+    fn pause_video(&mut self, id: &str) {
+        if let Some((_, job)) = self.video_jobs.remove(id) {
+            job.stop();
+        }
+        if let Some(i) = self.idx(id) {
+            let d = &mut self.downloads[i];
+            if matches!(d.state, State::Active | State::Queued) {
+                d.state = State::Paused;
+                d.dl_speed = 0;
+                d.note = None;
+                self.dirty.insert(id.to_string());
+            }
+        }
+    }
+
+    /// Queues a paused or failed video download; [`Self::pump_video`] starts it.
+    fn resume_video(&mut self, id: &str) {
+        if let Some(i) = self.idx(id) {
+            let d = &mut self.downloads[i];
+            if matches!(d.state, State::Paused | State::Failed) {
+                d.state = State::Queued;
+                d.error = None;
+                d.finished_at = None;
+                self.dirty.insert(id.to_string());
+            }
+        }
+    }
+
+    fn stop_all_video(&mut self) {
+        for (_, (_, job)) in self.video_jobs.drain() {
+            job.stop();
+        }
+    }
+
+    async fn on_video(&mut self, ((id, generation), ev): (VideoTag, JobEvent)) {
+        if self.video_jobs.get(&id).map(|(g, _)| *g) != Some(generation) {
+            return;
+        }
+        let Some(i) = self.idx(&id) else { return };
+        let d = &mut self.downloads[i];
+        match ev {
+            JobEvent::Progress { downloaded, total, speed, note, partial } => {
+                d.completed = downloaded;
+                d.total = total;
+                d.dl_speed = speed;
+                d.note = note;
+                if let Some(p) = partial
+                    && let Some(meta) = d.video.as_mut()
+                    && !meta.partials.contains(&p)
+                {
+                    meta.partials.push(p);
+                }
+                self.dirty.insert(id);
+                return;
+            }
+            JobEvent::Finished { path } => {
+                self.video_jobs.remove(&id);
+                d.state = State::Completed;
+                d.finished_at = Some(now_ms());
+                if let Some(p) = path {
+                    let len = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(d.total);
+                    if let Some(n) = p.file_name() {
+                        d.name = n.to_string_lossy().into_owned();
+                    }
+                    d.total = len;
+                    d.files = vec![FileEntry {
+                        index: 1,
+                        path: p.display().to_string(),
+                        length: len,
+                        completed: len,
+                        selected: true,
+                    }];
+                }
+                d.completed = d.total;
+                d.error = None;
+            }
+            JobEvent::Failed(msg) => {
+                self.video_jobs.remove(&id);
+                d.state = State::Failed;
+                d.error = Some(msg);
+            }
+        }
+        d.dl_speed = 0;
+        d.note = None;
+        let (name, state, err) = (d.name.clone(), d.state, d.error.clone());
+        self.dirty.insert(id.clone());
+        self.flush(true);
+        match state {
+            State::Completed => self.emit(Event::Completed { id, name }).await,
+            _ => {
+                self.emit(Event::Failed { id, name, error: err.unwrap_or_default() })
+                    .await
+            }
+        }
+        self.pump_video();
+        self.publish().await;
     }
 
     // ---- browser bridge ---------------------------------------------------
@@ -1236,6 +1602,26 @@ fn removable_paths(d: &Download) -> Vec<PathBuf> {
         out.push(PathBuf::from(format!("{}.aria2", p.display())));
         out.push(p);
     }
+    out
+}
+
+/// Files to trash for a removed video download: the result and yt-dlp's
+/// partial and intermediate files.
+fn video_removable_paths(d: &Download) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = d.local_path().into_iter().collect();
+    let dir = PathBuf::from(&d.dir);
+    for p in d.video.iter().flat_map(|m| &m.partials) {
+        let p = PathBuf::from(p);
+        // Only ever touch files inside the download folder.
+        if !p.starts_with(&dir) || p.components().any(|c| c == std::path::Component::ParentDir) {
+            continue;
+        }
+        for ext in [".part", ".ytdl"] {
+            out.push(PathBuf::from(format!("{}{ext}", p.display())));
+        }
+        out.push(p);
+    }
+    out.dedup();
     out
 }
 

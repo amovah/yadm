@@ -32,11 +32,30 @@ CREATE TABLE IF NOT EXISTS downloads (
     files       TEXT NOT NULL DEFAULT '[]',
     info_hash   TEXT,
     speed_limit INTEGER,
-    headers     TEXT NOT NULL DEFAULT '[]'
+    headers     TEXT NOT NULL DEFAULT '[]',
+    video       TEXT
 );
 CREATE INDEX IF NOT EXISTS downloads_gid ON downloads(gid);
-PRAGMA user_version = 1;
 "#;
+
+/// Current schema version (`PRAGMA user_version`).
+const VERSION: i64 = 2;
+
+/// Creates the schema, or upgrades one written by an older version.
+fn migrate(conn: &Connection) -> Result<()> {
+    conn.execute_batch(SCHEMA)?;
+    // Columns added after v1. Checked by name rather than by version, since an
+    // older YADM opening the database resets `user_version`.
+    let has = |col: &str| -> Result<bool> {
+        let mut stmt = conn.prepare("SELECT 1 FROM pragma_table_info('downloads') WHERE name = ?1")?;
+        Ok(stmt.exists([col])?)
+    };
+    if !has("video")? {
+        conn.execute_batch("ALTER TABLE downloads ADD COLUMN video TEXT;")?;
+    }
+    conn.pragma_update(None, "user_version", VERSION)?;
+    Ok(())
+}
 
 fn files_to_json(files: &[FileEntry]) -> String {
     serde_json::Value::Array(
@@ -75,13 +94,13 @@ impl Store {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
-        conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Self { conn })
     }
 
     pub fn in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
-        conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Self { conn })
     }
 
@@ -126,10 +145,10 @@ impl Store {
 
 fn upsert_on(conn: &Connection, d: &Download) -> Result<()> {
     conn.execute(
-            r#"INSERT INTO downloads (id,gid,kind,name,uris,dir,state,total,completed,uploaded,category,added_at,finished_at,error,files,info_hash,speed_limit,headers)
-               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
+            r#"INSERT INTO downloads (id,gid,kind,name,uris,dir,state,total,completed,uploaded,category,added_at,finished_at,error,files,info_hash,speed_limit,headers,video)
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
                ON CONFLICT(id) DO UPDATE SET gid=?2,kind=?3,name=?4,uris=?5,dir=?6,state=?7,total=?8,completed=?9,uploaded=?10,
-                 category=?11,finished_at=?13,error=?14,files=?15,info_hash=?16,speed_limit=?17,headers=?18"#,
+                 category=?11,finished_at=?13,error=?14,files=?15,info_hash=?16,speed_limit=?17,headers=?18,video=?19"#,
             params![
                 d.id,
                 d.gid,
@@ -149,12 +168,13 @@ fn upsert_on(conn: &Connection, d: &Download) -> Result<()> {
                 d.info_hash,
                 d.speed_limit.map(|v| v as i64),
                 serde_json::to_string(&d.headers)?,
+                d.video.as_ref().map(serde_json::to_string).transpose()?,
             ],
     )?;
     Ok(())
 }
 
-const COLS: &str = "id,gid,kind,name,uris,dir,state,total,completed,uploaded,category,added_at,finished_at,error,files,info_hash,speed_limit,headers";
+const COLS: &str = "id,gid,kind,name,uris,dir,state,total,completed,uploaded,category,added_at,finished_at,error,files,info_hash,speed_limit,headers,video";
 
 fn row_to_download(r: &rusqlite::Row<'_>) -> rusqlite::Result<Download> {
     let uris: String = r.get(4)?;
@@ -179,6 +199,9 @@ fn row_to_download(r: &rusqlite::Row<'_>) -> rusqlite::Result<Download> {
         info_hash: r.get(15)?,
         speed_limit: r.get::<_, Option<i64>>(16)?.map(|v| v as u64),
         headers: serde_json::from_str(&headers).unwrap_or_default(),
+        video: r
+            .get::<_, Option<String>>(18)?
+            .and_then(|v| serde_json::from_str(&v).ok()),
         ..Default::default()
     })
 }
@@ -226,5 +249,48 @@ mod tests {
         assert_eq!(all[1].state, State::Completed);
         s.delete("a").unwrap();
         assert!(s.get("a").unwrap().is_none());
+
+        let v = Download {
+            id: "v".into(),
+            kind: DownloadKind::Video,
+            video: Some(crate::model::VideoMeta {
+                selector: "bv*+ba/b".into(),
+                quality_label: "Best".into(),
+                partials: vec!["/tmp/x.part".into()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        s.upsert(&v).unwrap();
+        assert_eq!(s.get("v").unwrap().unwrap(), v);
+    }
+
+    #[test]
+    fn migrates_v1() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("yadm.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE downloads (id TEXT PRIMARY KEY, gid TEXT, kind TEXT NOT NULL, name TEXT NOT NULL,
+                 uris TEXT NOT NULL, dir TEXT NOT NULL, state TEXT NOT NULL, total INTEGER NOT NULL DEFAULT 0,
+                 completed INTEGER NOT NULL DEFAULT 0, uploaded INTEGER NOT NULL DEFAULT 0, category TEXT NOT NULL,
+                 added_at INTEGER NOT NULL, finished_at INTEGER, error TEXT, files TEXT NOT NULL DEFAULT '[]',
+                 info_hash TEXT, speed_limit INTEGER, headers TEXT NOT NULL DEFAULT '[]');
+                 INSERT INTO downloads (id,kind,name,uris,dir,state,category,added_at)
+                   VALUES ('old','http','a.zip','[]','/tmp','completed','archives',1);
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        let old = s.get("old").unwrap().unwrap();
+        assert_eq!(old.name, "a.zip");
+        assert!(old.video.is_none());
+        drop(s);
+        // Reopening an up-to-date database is a no-op, even after an older
+        // version reset the schema version.
+        Connection::open(&path).unwrap().execute_batch("PRAGMA user_version = 1;").unwrap();
+        assert!(Store::open(&path).unwrap().get("old").unwrap().is_some());
     }
 }

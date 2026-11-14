@@ -1,0 +1,22 @@
+{
+  "_type": "video",
+  "id": "abc123",
+  "title": "Sample video",
+  "uploader": "Someone",
+  "duration": 212.0,
+  "thumbnail": "https://i.ytimg.com/vi/abc123/maxresdefault.jpg",
+  "extractor_key": "Youtube",
+  "webpage_url": "https://www.youtube.com/watch?v=abc123",
+  "ext": "mp4",
+  "formats": [
+    { "format_id": "sb0", "ext": "mhtml", "vcodec": "none", "acodec": "none", "height": 90 },
+    { "format_id": "139", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.5", "tbr": 48.0, "filesize": 1300000 },
+    { "format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2", "tbr": 129.0, "filesize": 3400000 },
+    { "format_id": "251", "ext": "webm", "vcodec": "none", "acodec": "opus", "tbr": 135.0, "filesize": 5000000 },
+    { "format_id": "18", "ext": "mp4", "vcodec": "avc1.42001E", "acodec": "mp4a.40.2", "height": 360, "tbr": 500.0, "filesize_approx": 13000000 },
+    { "format_id": "134", "ext": "mp4", "vcodec": "avc1.4d401e", "acodec": "none", "height": 360, "tbr": 300.0, "filesize": 8000000 },
+    { "format_id": "136", "ext": "mp4", "vcodec": "avc1.4d401f", "acodec": "none", "height": 720, "tbr": 1500.0, "filesize": 40000000 },
+    { "format_id": "137", "ext": "mp4", "vcodec": "avc1.640028", "acodec": "none", "height": 1080, "tbr": 3000.0, "filesize": 80000000 },
+    { "format_id": "248", "ext": "webm", "vcodec": "vp9", "acodec": "none", "height": 1080, "tbr": 3500.0, "filesize": 100000000 }
+  ]
+}

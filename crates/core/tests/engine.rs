@@ -113,3 +113,46 @@ fn add_complete_persist_restart() {
     });
     h.shutdown_blocking(Duration::from_secs(5));
 }
+
+/// A video through the engine: queued, run by yt-dlp, completed with its file.
+/// Talks to YouTube, so only with `YADM_VIDEO_TESTS=1`.
+#[test]
+fn video_download_completes() {
+    if std::env::var_os("YADM_VIDEO_TESTS").is_none() {
+        eprintln!("YADM_VIDEO_TESTS not set; skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = Paths::at(tmp.path().join("data"));
+    let h = Engine::start(paths.clone(), settings(tmp.path()));
+    let tools = recv_until(&h, 30, |e| match e {
+        Event::Snapshot(s) if s.tools.ytdlp_version.is_some() => Some(s.tools.clone()),
+        _ => None,
+    });
+    h.send(Command::Add(AddRequest {
+        uris: vec!["https://www.youtube.com/watch?v=jNQXAC9IVRw".into()],
+        filename: Some("Me at the zoo".into()),
+        video: Some(VideoMeta {
+            selector: if tools.ffmpeg.is_some() { "bv*[height<=240]+ba/b".into() } else { "b".into() },
+            quality_label: "240p".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }));
+    let id = recv_until(&h, 120, |e| match e {
+        Event::Completed { id, .. } => Some(id.clone()),
+        Event::Failed { error, .. } => panic!("video failed: {error}"),
+        _ => None,
+    });
+    let d = recv_until(&h, 10, |e| match e {
+        Event::Snapshot(s) => s.downloads.iter().find(|d| d.id == id && d.state == State::Completed).cloned(),
+        _ => None,
+    });
+    assert_eq!(d.kind, DownloadKind::Video);
+    assert_eq!(d.category, Category::Video);
+    let path = d.local_path().expect("file path");
+    assert!(path.starts_with(tmp.path().join("dl").join(Category::Video.folder())), "{path:?}");
+    assert!(d.name.starts_with("Me at the zoo."), "{}", d.name);
+    assert!(path.is_file());
+    h.shutdown_blocking(Duration::from_secs(5));
+}

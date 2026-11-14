@@ -35,6 +35,35 @@ impl Default for BridgeSettings {
     }
 }
 
+/// Video downloads through yt-dlp.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VideoSettings {
+    /// Overrides for the tool locations; `None` finds them automatically.
+    pub ytdlp_path: Option<PathBuf>,
+    pub ffmpeg_path: Option<PathBuf>,
+    pub deno_path: Option<PathBuf>,
+    /// Preselected quality: "best", "audio" or a maximum height like "1080".
+    pub default_quality: String,
+    /// Browser to read cookies from (signed-in or age-restricted videos).
+    pub cookies_from_browser: Option<String>,
+    /// Video downloads running at the same time.
+    pub max_concurrent: u32,
+}
+
+impl Default for VideoSettings {
+    fn default() -> Self {
+        Self {
+            ytdlp_path: None,
+            ffmpeg_path: None,
+            deno_path: None,
+            default_quality: "1080".into(),
+            cookies_from_browser: None,
+            max_concurrent: 2,
+        }
+    }
+}
+
 pub fn new_token() -> String {
     rand::rng()
         .sample_iter(&rand::distr::Alphanumeric)
@@ -59,6 +88,7 @@ pub struct Settings {
     pub proxy: String,
     pub seed_ratio: f32,
     pub bridge: BridgeSettings,
+    pub video: VideoSettings,
     pub clipboard_monitor: bool,
     pub close_to_tray: bool,
     pub show_tray: bool,
@@ -86,6 +116,7 @@ impl Default for Settings {
             proxy: String::new(),
             seed_ratio: 1.0,
             bridge: BridgeSettings::default(),
+            video: VideoSettings::default(),
             clipboard_monitor: false,
             close_to_tray: true,
             show_tray: true,

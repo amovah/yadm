@@ -12,10 +12,11 @@ pub mod paths;
 pub mod schedule;
 pub mod settings;
 pub mod store;
+pub mod video;
 
 pub use category::Category;
 pub use engine::{Engine, EngineHandle};
 pub use model::*;
 pub use paths::Paths;
-pub use settings::{BridgeSettings, Settings, ThemePref};
+pub use settings::{BridgeSettings, Settings, ThemePref, VideoSettings};
 pub use yadm_bridge::BrowserRequest;

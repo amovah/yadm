@@ -9022,6 +9022,7 @@ dependencies = [
  "async-channel",
  "chrono",
  "dirs 6.0.0",
+ "libc",
  "percent-encoding",
  "rand 0.9.5",
  "rusqlite",

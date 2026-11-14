@@ -15,6 +15,8 @@ pub enum DownloadKind {
     Torrent,
     Magnet,
     Metalink,
+    /// A media page downloaded by yt-dlp instead of aria2.
+    Video,
 }
 
 impl DownloadKind {
@@ -24,6 +26,7 @@ impl DownloadKind {
             DownloadKind::Torrent => "torrent",
             DownloadKind::Magnet => "magnet",
             DownloadKind::Metalink => "metalink",
+            DownloadKind::Video => "video",
         }
     }
 
@@ -32,6 +35,7 @@ impl DownloadKind {
             "torrent" => DownloadKind::Torrent,
             "magnet" => DownloadKind::Magnet,
             "metalink" => DownloadKind::Metalink,
+            "video" => DownloadKind::Video,
             _ => DownloadKind::Http,
         }
     }
@@ -150,6 +154,28 @@ pub struct Download {
     pub headers: Vec<String>,
     /// Position in aria2's waiting queue.
     pub queue_pos: Option<usize>,
+    /// yt-dlp options for [`DownloadKind::Video`].
+    pub video: Option<VideoMeta>,
+    /// Transient status shown instead of the speed, e.g. "Merging" (not persisted).
+    pub note: Option<String>,
+}
+
+/// What to fetch for a [`DownloadKind::Video`] download; the page URL is `uris[0]`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VideoMeta {
+    /// yt-dlp format selector (`-f`).
+    pub selector: String,
+    /// Human label of the chosen quality, e.g. "1080p".
+    pub quality_label: String,
+    /// Convert to this audio format (`-x --audio-format`), e.g. "mp3".
+    pub audio_format: Option<String>,
+    /// Output name without extension; `None` uses the video title.
+    pub filename: Option<String>,
+    /// Size estimated when probing, shown until yt-dlp reports real sizes.
+    pub est_size: Option<u64>,
+    /// Partial files yt-dlp wrote, so they can be cleaned up on delete.
+    pub partials: Vec<String>,
 }
 
 impl Download {
@@ -209,6 +235,8 @@ pub struct Snapshot {
     pub engine: EngineStatus,
     /// Label of the schedule rule currently in effect.
     pub schedule: Option<String>,
+    /// External video tools found on this machine.
+    pub tools: crate::video::Tools,
 }
 
 impl Default for Snapshot {
@@ -218,6 +246,7 @@ impl Default for Snapshot {
             global: GlobalStats::default(),
             engine: EngineStatus::Starting,
             schedule: None,
+            tools: Default::default(),
         }
     }
 }
@@ -237,6 +266,8 @@ pub struct AddRequest {
     pub start_paused: bool,
     pub connections: Option<u32>,
     pub speed_limit: Option<u64>,
+    /// Download `uris[0]` as a video with yt-dlp.
+    pub video: Option<VideoMeta>,
 }
 
 #[derive(Debug, Clone)]
@@ -272,6 +303,8 @@ pub enum Command {
     },
     RequestDetails(DownloadId),
     UpdateSettings(Box<Settings>),
+    /// Updates yt-dlp to its latest release (in the data folder).
+    UpdateYtdlp,
     /// Window visibility; lowers the polling rate when hidden.
     SetVisible(bool),
     /// The user's answer to [`Event::PairRequest`].

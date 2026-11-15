@@ -81,8 +81,14 @@ pub struct AppView {
     pub(super) show_empty_categories: bool,
     pub(super) last_clipboard: Option<String>,
     _subscriptions: Vec<Subscription>,
+    /// Re-renders while toasts are on screen, so the "Clear all" pill tracks
+    /// toasts that time out on their own.
+    notif_watch: Option<Task<()>>,
     _tasks: Vec<Task<()>>,
 }
+
+/// Vertical room kept above the toast stack for the "Clear all" pill.
+pub const CLEAR_PILL_ROOM: f32 = 32.;
 
 impl AppView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -141,6 +147,7 @@ impl AppView {
             show_empty_categories: false,
             last_clipboard: None,
             _subscriptions: subs,
+            notif_watch: None,
             _tasks: vec![tick],
         };
         // Don't offer whatever is already on the clipboard at launch.
@@ -199,6 +206,7 @@ impl AppView {
                     })
             });
         window.push_notification(note, cx);
+        cx.notify();
     }
 
     fn on_store_event(&mut self, _: &Entity<AppStore>, ev: &StoreEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -242,6 +250,7 @@ impl AppView {
             }
         };
         window.push_notification(note, cx);
+        cx.notify();
     }
 
     // ---- derived rows -----------------------------------------------------
@@ -678,6 +687,64 @@ impl Render for AppView {
                 }
             }));
         let root = self.register_global_actions(root, cx);
-        v_flex().size_full().bg(cx.theme().sidebar).children(title_bar).child(root)
+        let clear_pill = self.render_clear_notifications(window, cx);
+        v_flex().relative().size_full().bg(cx.theme().sidebar).children(title_bar).child(root).children(clear_pill)
+    }
+}
+
+impl AppView {
+    /// "Clear all (n)" pill above the toast stack, shown while 2+ toasts are up.
+    /// gpui-kit draws the toasts in its own overlay, so the pill is placed from
+    /// the theme's notification margins (see `theme::apply`).
+    fn render_clear_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use gpui_kit::component::Sizable as _;
+        use gpui_kit::component::button::{Button, ButtonRounded};
+
+        let count = window.notifications(cx).len();
+        if count > 0 && self.notif_watch.is_none() {
+            self.notif_watch = Some(cx.spawn_in(window, async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(Duration::from_millis(250)).await;
+                    let live = this
+                        .update_in(cx, |_, window, cx| {
+                            cx.notify();
+                            window.notifications(cx).len()
+                        })
+                        .unwrap_or(0);
+                    if live == 0 {
+                        break;
+                    }
+                }
+                this.update(cx, |this, _| this.notif_watch = None).ok();
+            }));
+        }
+        if count < 2 {
+            return None;
+        }
+
+        let margins = cx.theme().notification.margins.clone();
+        let room = dp(CLEAR_PILL_ROOM);
+        Some(
+            div()
+                .absolute()
+                .top(margins.top - room)
+                .right(margins.right)
+                .h(room)
+                .flex()
+                .items_center()
+                .child(
+                    Button::new("clear-notifications")
+                        .small()
+                        .outline()
+                        .rounded(ButtonRounded::Large)
+                        .label(format!("Clear all ({count})"))
+                        .tooltip("Dismiss all notifications")
+                        .on_click(cx.listener(|_, _, window, cx| {
+                            window.clear_notifications(cx);
+                            cx.notify();
+                        })),
+                )
+                .into_any_element(),
+        )
     }
 }

@@ -1,5 +1,6 @@
 //! Linear-style theme for gpui-component, loaded from `themes/linear.json`.
 
+use gpui_kit::component::notification::NotificationSettings;
 use gpui_kit::component::{Theme, ThemeMode, ThemeRegistry};
 use gpui_kit::{App, Hsla, WindowAppearance, px, rgb};
 use yadm_core::ThemePref;
@@ -42,6 +43,9 @@ pub fn apply(pref: ThemePref, cx: &mut App) {
     let theme = Theme::global_mut(cx);
     theme.font_size = px(14. * scale);
     theme.mono_font_size = px(13. * scale);
+    // Leave room above the toast stack for the "Clear all" pill.
+    theme.notification.margins.top =
+        NotificationSettings::default().margins.top + px(crate::ui::root::CLEAR_PILL_ROOM * scale);
     cx.refresh_windows();
 }
 

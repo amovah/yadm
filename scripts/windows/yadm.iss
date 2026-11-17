@@ -47,6 +47,10 @@ Source: "..\..\dist\YADM\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 Name: "{autoprograms}\YADM"; Filename: "{app}\YADM.exe"
 Name: "{autodesktop}\YADM"; Filename: "{app}\YADM.exe"; Tasks: desktopicon
 
+[Registry]
+; Settings → General → Open at login writes this value; drop it on uninstall.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "YADM"; Flags: uninsdeletevalue dontcreatekey
+
 [Run]
 Filename: "{app}\YADM.exe"; Description: "{cm:LaunchProgram,YADM}"; Flags: nowait postinstall skipifsilent
 

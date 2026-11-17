@@ -13,8 +13,11 @@ use ksni::blocking::{Handle, TrayMethods as _};
 use ksni::menu::StandardItem;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use yadm_core::format;
+
+/// How long a missing tray host is retried after startup.
+const STARTUP_GRACE: Duration = Duration::from_secs(15);
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 
@@ -118,8 +121,11 @@ pub fn start(cx: &mut App) {
     let store = AppStore::global(cx);
     cx.spawn(async move |cx: &mut AsyncApp| {
         let mut tray: Option<(Handle<YadmTray>, Receiver<Click>)> = None;
-        // Don't retry every tick when the desktop has no tray host.
+        // Don't retry every tick when the desktop has no tray host, except
+        // early on: at login the host can come up after YADM does.
+        let started = Instant::now();
         let mut failed = false;
+        let mut retry_at = started;
         let mut last_speed = String::new();
         loop {
             cx.background_executor().timer(Duration::from_millis(400)).await;
@@ -129,15 +135,18 @@ pub fn start(cx: &mut App) {
                 let g = &s.snapshot().global;
                 let speed = if g.active > 0 && g.dl_speed > 0 { format::speed(g.dl_speed) } else { String::new() };
                 match (&tray, want) {
-                    (None, true) if !failed => match spawn() {
-                        Ok(t) => tray = Some(t),
-                        Err(e) => {
-                            failed = true;
-                            tracing::warn!(
-                                "tray icon unavailable (on GNOME, enable the AppIndicator extension): {e}"
-                            );
+                    (None, true) if !failed && Instant::now() >= retry_at => {
+                        match spawn() {
+                            Ok(t) => tray = Some(t),
+                            Err(_) if started.elapsed() < STARTUP_GRACE => retry_at = Instant::now() + Duration::from_secs(2),
+                            Err(e) => {
+                                failed = true;
+                                tracing::warn!(
+                                    "tray icon unavailable (on GNOME, enable the AppIndicator extension): {e}"
+                                );
+                            }
                         }
-                    },
+                    }
                     (Some((h, _)), false) => {
                         h.shutdown();
                         tray = None;

@@ -4,6 +4,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod actions;
+mod autostart;
 mod clipboard;
 mod platform;
 mod store;
@@ -29,7 +30,7 @@ use actions::*;
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 use std::time::Duration;
-use store::AppStore;
+use store::{AppStore, StoreEvent};
 use ui::AppView;
 use ui::kit::dp;
 use yadm_core::{Engine, Paths, Settings};
@@ -94,6 +95,55 @@ fn hide_window(cx: &mut App) {
     });
 }
 
+/// Login start on Windows/Linux: close the window into the tray once the
+/// tray is up. Without one (no StatusNotifierItem host, or the icon turned
+/// off) the window stays, rather than leaving YADM running out of reach.
+fn start_in_tray(cx: &mut App) {
+    cx.spawn(async |cx: &mut AsyncApp| {
+        // The tray host may come up a little after the session starts.
+        for _ in 0..30 {
+            cx.background_executor().timer(Duration::from_millis(500)).await;
+            let done = cx.update(|cx| {
+                if !AppStore::global(cx).read(cx).settings().show_tray {
+                    return true;
+                }
+                if !tray::is_active() {
+                    return false;
+                }
+                for w in cx.windows() {
+                    w.update(cx, |_, window, _| window.remove_window()).ok();
+                }
+                true
+            });
+            if done {
+                break;
+            }
+        }
+    })
+    .detach();
+}
+
+/// Browser hand-offs and pairing are answered in the main window. If it's
+/// closed into the tray, open it and replay the request to the new window.
+fn reopen_for_browser_requests(cx: &mut App) {
+    let store = AppStore::global(cx);
+    cx.subscribe(&store, |store, ev, cx| {
+        if !cx.windows().is_empty() {
+            return;
+        }
+        let replay = match ev {
+            StoreEvent::BrowserRequest(req) => StoreEvent::BrowserRequest(req.clone()),
+            StoreEvent::PairRequest { id, browser } => StoreEvent::PairRequest { id: *id, browser: browser.clone() },
+            _ => return,
+        };
+        cx.defer(move |cx| {
+            open_main_window(cx);
+            store.update(cx, |_, cx| cx.emit(replay));
+        });
+    })
+    .detach();
+}
+
 fn quit(cx: &mut App) {
     let engine = AppStore::global(cx).read(cx).engine().clone();
     engine.shutdown_blocking(Duration::from_secs(4));
@@ -151,6 +201,9 @@ fn main() {
 
     let paths = Paths::system();
     let settings = Settings::load(&paths.settings());
+    autostart::sync(settings.launch_at_login);
+    // Launched by the login item: start in the background.
+    let hidden = std::env::args().skip(1).any(|a| a == autostart::HIDDEN_ARG);
     let engine = Engine::start(paths, settings.clone());
 
     // The tray keeps YADM alive with no window open.
@@ -175,6 +228,15 @@ fn main() {
 
         open_main_window(cx);
         tray::start(cx);
-        cx.activate(true);
+        if !hidden {
+            cx.activate(true);
+        } else if platform::IS_MAC {
+            // Like closing to the menu bar: the window stays (and with it
+            // notifications and browser requests); the Dock brings it back.
+            cx.hide();
+        } else {
+            start_in_tray(cx);
+        }
+        reopen_for_browser_requests(cx);
     });
 }

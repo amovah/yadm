@@ -33,6 +33,7 @@ and dark.
 - **Scheduler**: limit speed or pause everything at certain times.
 - **Bandwidth limits** and seeding ratio for torrents.
 - **Menu bar / system tray icon** with live speed and quick controls.
+- **Open at login** (optional, off by default): starts in the background from **Settings → General**.
 - **Keyboard first**: almost everything has a shortcut, plus a fuzzy command palette.
 - **Interface size**: follows the system (including GNOME's text scaling on Linux) or 90–150%.
 
@@ -44,8 +45,12 @@ and dark.
 | Bundled aria2 | `YADM.app` | next to `YADM.exe` | next to `yadm` |
 | Bundled yt-dlp, Deno, ffmpeg | `YADM.app` | next to `YADM.exe` | next to `yadm` |
 | Tray icon / close to tray | menu bar | system tray | system tray (StatusNotifierItem) |
+| Open at login | LaunchAgent in `~/Library/LaunchAgents` | `HKCU\…\CurrentVersion\Run` | `~/.config/autostart` |
 | Shortcut modifier | ⌘ | Ctrl | Ctrl |
 | Data folder | `~/Library/Application Support/YADM` | `%APPDATA%\YADM` | `~/.local/share/YADM` |
+
+**Open at login** points at wherever YADM runs from and follows it if the app moves. On macOS 13+ the
+system announces the new background item and lists YADM under **System Settings → General → Login Items**.
 
 The data folder holds `settings.toml`, `yadm.db` (history), `engine/` (aria2 session and log) and `tools/`
 (yt-dlp after **Settings → Video → Update**).

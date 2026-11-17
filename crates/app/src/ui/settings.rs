@@ -589,6 +589,25 @@ impl SettingsView {
                 if crate::platform::HAS_TRAY {
                     rows.push(Self::row("Keep running when the window closes", None, "background quit close tray", self.switch("close-to-tray", s.close_to_tray, cx, |s, v| s.close_to_tray = v), cx));
                 }
+                if crate::platform::HAS_AUTOSTART {
+                    let description = if crate::platform::IS_MAC {
+                        "Starts in the background; the menu bar icon or Dock opens the window"
+                    } else {
+                        "Starts in the background in the system tray"
+                    };
+                    // Change the OS login item first; the switch only flips if that worked.
+                    let login = Switch::new("launch-at-login").checked(s.launch_at_login).on_change(cx.listener(|this, v: &bool, window, cx| {
+                        let v = *v;
+                        match crate::autostart::set(v) {
+                            Ok(()) => this.edit(window, cx, |s| s.launch_at_login = v),
+                            Err(e) => {
+                                this.error = Some(format!("Couldn't change the login item: {e:#}"));
+                                cx.notify();
+                            }
+                        }
+                    }));
+                    rows.push(Self::row("Open at login", Some(description), "startup boot login autostart launch", login, cx));
+                }
                 rows
             }
             Section::Appearance => {

@@ -25,6 +25,10 @@ schemars = "1"
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
 tray-icon = "0.21"
 
+# Login item: the per-user `Run` registry key.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+
 # Linux tray: StatusNotifierItem over D-Bus (KDE, GNOME with the AppIndicator
 # extension, Xfce…), no GTK needed. The blocking flavor runs on its own thread.
 [target.'cfg(target_os = "linux")'.dependencies]

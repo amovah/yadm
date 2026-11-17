@@ -10,6 +10,9 @@ pub const IS_MAC: bool = cfg!(target_os = "macos");
 /// [`crate::tray`] reports inactive and closing the window quits as usual.
 pub const HAS_TRAY: bool = cfg!(any(target_os = "macos", windows, target_os = "linux"));
 
+/// Whether YADM can register itself to start at login (see [`crate::autostart`]).
+pub const HAS_AUTOSTART: bool = cfg!(any(target_os = "macos", windows, target_os = "linux"));
+
 /// Rewrites a `cmd-` keystroke for the host OS (`ctrl-` off macOS).
 ///
 /// gpui's static `KeyBinding::new` can't resolve `secondary-`, so bindings

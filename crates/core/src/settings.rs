@@ -93,6 +93,8 @@ pub struct Settings {
     pub close_to_tray: bool,
     pub show_tray: bool,
     pub notify_on_complete: bool,
+    /// Start YADM in the background when the user logs in (off by default).
+    pub launch_at_login: bool,
     pub theme: ThemePref,
     /// Interface size multiplier; `None` follows the system (GNOME's text
     /// scaling on Linux, 1.0 elsewhere since macOS/Windows scale natively).
@@ -121,6 +123,7 @@ impl Default for Settings {
             close_to_tray: true,
             show_tray: true,
             notify_on_complete: true,
+            launch_at_login: false,
             theme: ThemePref::System,
             ui_scale: None,
             schedule: vec![],

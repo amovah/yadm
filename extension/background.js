@@ -78,7 +78,17 @@ async function buildPayload(url, extra = {}) {
   };
 }
 
+// When the browser starts it fires onCreated for every download already in its history
+// (finished, failed or paused ones). Only a download that has just started is new.
+function isFresh(item) {
+  if (item.state && item.state !== "in_progress") return false;
+  if (item.paused) return false;
+  const started = Date.parse(item.startTime);
+  return Number.isNaN(started) || Date.now() - started < 30_000;
+}
+
 function shouldSkip(item, cfg) {
+  if (!isFresh(item)) return true;
   if (!/^(https?|ftp):/.test(item.finalUrl || item.url)) return true; // blob:, data:
   if (cfg.minSizeMB > 0 && item.fileSize > 0 && item.fileSize < cfg.minSizeMB * 1024 * 1024) return true;
   const skip = cfg.skipTypes.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);

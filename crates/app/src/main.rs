@@ -95,30 +95,28 @@ fn hide_window(cx: &mut App) {
     });
 }
 
-/// Login start on Windows/Linux: close the window into the tray once the
-/// tray is up. Without one (no StatusNotifierItem host, or the icon turned
-/// off) the window stays, rather than leaving YADM running out of reach.
+/// Login start on Windows/Linux: run from the tray without opening the
+/// window. If no tray icon comes up (no StatusNotifierItem host, or the icon
+/// turned off) open the window, rather than leaving YADM running out of reach.
 fn start_in_tray(cx: &mut App) {
+    if !AppStore::global(cx).read(cx).settings().show_tray {
+        open_main_window(cx);
+        return;
+    }
     cx.spawn(async |cx: &mut AsyncApp| {
         // The tray host may come up a little after the session starts.
         for _ in 0..30 {
-            cx.background_executor().timer(Duration::from_millis(500)).await;
-            let done = cx.update(|cx| {
-                if !AppStore::global(cx).read(cx).settings().show_tray {
-                    return true;
-                }
-                if !tray::is_active() {
-                    return false;
-                }
-                for w in cx.windows() {
-                    w.update(cx, |_, window, _| window.remove_window()).ok();
-                }
-                true
-            });
-            if done {
-                break;
+            if cx.update(|_| tray::is_active()) {
+                return;
             }
+            cx.background_executor().timer(Duration::from_millis(500)).await;
         }
+        cx.update(|cx| {
+            // A browser request may have opened it meanwhile.
+            if cx.windows().is_empty() {
+                open_main_window(cx);
+            }
+        });
     })
     .detach();
 }
@@ -226,13 +224,14 @@ fn main() {
         cx.on_action(|_: &HideWindow, cx| hide_window(cx));
         set_menus(cx);
 
-        open_main_window(cx);
         tray::start(cx);
         if !hidden {
+            open_main_window(cx);
             cx.activate(true);
         } else if platform::IS_MAC {
             // Like closing to the menu bar: the window stays (and with it
             // notifications and browser requests); the Dock brings it back.
+            open_main_window(cx);
             cx.hide();
         } else {
             start_in_tray(cx);

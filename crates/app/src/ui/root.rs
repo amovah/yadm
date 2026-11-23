@@ -90,6 +90,9 @@ pub struct AppView {
 /// Vertical room kept above the toast stack for the "Clear all" pill.
 pub const CLEAR_PILL_ROOM: f32 = 32.;
 
+/// Height of the download list's toolbar (title, search, actions).
+pub const TOOLBAR_HEIGHT: f32 = 48.;
+
 impl AppView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let store = AppStore::global(cx);
@@ -732,6 +735,8 @@ impl AppView {
                 .h(room)
                 .flex()
                 .items_center()
+                // Swallow clicks so the toolbar underneath doesn't get them too.
+                .occlude()
                 .child(
                     Button::new("clear-notifications")
                         .small()

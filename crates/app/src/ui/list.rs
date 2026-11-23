@@ -1,7 +1,7 @@
 //! The grouped, virtualized download list with Linear-style rows.
 
 use super::kit::{ROW_H, category_icon, chip, kbd, kbd_on, progress_bar, state_color, state_icon, status_glyph};
-use super::root::{AppView, GroupBy, GroupKey, Nav, Row};
+use super::root::{AppView, GroupBy, GroupKey, Nav, Row, TOOLBAR_HEIGHT};
 use crate::actions::{self, *};
 use crate::theme::palette;
 use gpui_kit::assets::IconName as Lucide;
@@ -280,7 +280,7 @@ impl AppView {
         };
         let group_by = self.group_by;
         h_flex()
-            .h(dp(48.))
+            .h(dp(TOOLBAR_HEIGHT))
             .flex_shrink_0()
             .px_4()
             .gap_2()

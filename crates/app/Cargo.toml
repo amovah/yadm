@@ -19,6 +19,9 @@ serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 schemars = "1"
+# Reads the HTML flavor of the clipboard (gpui only exposes text and images),
+# where copied "Download" buttons keep their link targets.
+clipboard-rs = { version = "0.3.5", default-features = false }
 
 # Linux uses ksni instead (below): tray-icon needs a GTK event loop there,
 # which gpui doesn't run.

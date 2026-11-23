@@ -173,7 +173,9 @@ impl AppView {
             return;
         }
         self.last_clipboard = Some(text.clone());
-        let links = crate::clipboard::download_links(&text);
+        // The HTML is only read once the text changed: that's the cheap check.
+        let html = crate::clipboard::read_html();
+        let links = crate::clipboard::links_from(&text, html.as_deref(), false);
         if links.is_empty() {
             return;
         }
@@ -567,7 +569,7 @@ impl AppView {
             }))
             .on_action(cx.listener(|this, _: &PasteDownload, window, cx| {
                 let text = cx.read_from_clipboard().and_then(|c| c.text()).unwrap_or_default();
-                let links = crate::clipboard::download_links(&text);
+                let links = crate::clipboard::links_from(&text, crate::clipboard::read_html().as_deref(), false);
                 let req = (!links.is_empty()).then(|| AddRequest { uris: links, ..Default::default() });
                 this.open_add(req, window, cx);
             }))
@@ -583,7 +585,7 @@ impl AppView {
         el.on_action(cx.listener(|this, _: &NewDownload, window, cx| {
             // Pre-fill with links from the clipboard, if it holds any.
             let text = cx.read_from_clipboard().and_then(|c| c.text()).unwrap_or_default();
-            let links = crate::clipboard::candidate_links(&text);
+            let links = crate::clipboard::links_from(&text, crate::clipboard::read_html().as_deref(), true);
             let req = (!links.is_empty()).then(|| AddRequest { uris: links, ..Default::default() });
             this.open_add(req, window, cx)
         }))

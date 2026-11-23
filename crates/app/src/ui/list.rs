@@ -439,16 +439,24 @@ impl AppView {
                 .flex_1()
                 .into_any_element()
         };
+        // The list's key context wraps only the rows, not the toolbar: the search
+        // input lives there and must receive single-key shortcuts as text.
         v_flex()
             .size_full()
             .relative()
-            .key_context(actions::LIST_CONTEXT)
-            .track_focus(&self.focus)
             .on_action(cx.listener(|this, _: &GroupByStatus, _, cx| this.set_group(GroupBy::Status, cx)))
             .on_action(cx.listener(|this, _: &GroupByCategory, _, cx| this.set_group(GroupBy::Category, cx)))
             .on_action(cx.listener(|this, _: &GroupByNone, _, cx| this.set_group(GroupBy::None, cx)))
             .child(toolbar)
-            .child(body)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .key_context(actions::LIST_CONTEXT)
+                    .track_focus(&self.focus)
+                    .child(body),
+            )
             .children(self.render_bulk_bar(cx))
     }
 
